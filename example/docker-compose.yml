@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+
+  elasticsearch-vm-autoscaler:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    container_name: elasticsearch-vm-autoscaler
+    depends_on:
+      - prometheus
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - PROMETHEUS_CONDITION=rate(up{job="prometheus"}[5m]) == 1
+      - DEBUG_MODE=true
+      - GCP_PROJECT_ID="test"
+      - ZONE="europe-west-1b"
+      - MIGNAME="compute-mig"
