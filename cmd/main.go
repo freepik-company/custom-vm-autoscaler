@@ -1,12 +1,12 @@
 package main
 
 import (
-	"elasticsearch-vm-autoscaler/internal/elasticsearch"
 	mig "elasticsearch-vm-autoscaler/internal/google-mig"
 	"elasticsearch-vm-autoscaler/internal/prometheus"
 	"elasticsearch-vm-autoscaler/internal/slack"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,6 +28,9 @@ func main() {
 	elasticUser := os.Getenv("ELASTIC_USER")
 	elasticPassword := os.Getenv("ELASTIC_PASSWORD")
 
+	cooldownPeriodSeconds, _ := strconv.ParseInt(os.Getenv("COOLDOWN_PERIOD_SEC"), 10, 64)
+	retryIntervalSeconds, _ := strconv.ParseInt(os.Getenv("RETRY_INTERVAL_SEC"), 10, 64)
+
 	// Other variables
 	debugModeStr := os.Getenv("DEBUG_MODE")
 	// Convierte el valor a booleano
@@ -42,44 +45,30 @@ func main() {
 		condition, err := prometheus.GetPrometheusCondition(prometheusURL, prometheusCondition)
 		if err != nil {
 			log.Printf("Error querying Prometheus: %v", err)
-
-			// Retry after 5 seconds
-			time.Sleep(5 * time.Second)
+			time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
 			continue
 		}
 
 		if condition {
 			log.Printf("Condition %s met: Creating new node!", prometheusCondition)
-			if !debugMode {
-				err = mig.AddNodeToMIG(projectID, zone, migName)
-				if err != nil {
-					log.Printf("Error adding node to MIG: %v", err)
-					continue
-				}
-				slack.NotifySlack("Removed node from MIG", slackWebhookURL)
+			err = mig.AddNodeToMIG(projectID, zone, migName, debugMode)
+			if err != nil {
+				log.Printf("Error adding node to MIG: %v", err)
+				time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
+				continue
 			}
+			slack.NotifySlack("Added node to MIG", slackWebhookURL)
 		} else {
 			log.Printf("Condition %s not met. Removing one node!", prometheusCondition)
-			if !debugMode {
-
-				instanceToRemove, err := mig.GetInstanceToRemove(projectID, zone, migName)
-				if err != nil {
-					log.Printf("Error getting instance to remove: %v", err)
-					continue
-				}
-				err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
-				if err != nil {
-					log.Printf("Error draining node in Elasticsearch: %v", err)
-					continue
-				}
-				err = mig.RemoveNodeFromMIG(projectID, zone, migName, instanceToRemove)
-				if err != nil {
-					log.Printf("Error draining node from MIG: %v", err)
-					continue
-				}
+			err = mig.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
+			if err != nil {
+				log.Printf("Error draining node from MIG: %v", err)
+				time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
+				continue
 			}
+			slack.NotifySlack("Removed node from MIG", slackWebhookURL)
 		}
 		// Check every 5 minutes
-		time.Sleep(5 * time.Minute)
+		time.Sleep(time.Duration(cooldownPeriodSeconds) * time.Second)
 	}
 }

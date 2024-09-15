@@ -21,3 +21,9 @@ services:
       - GCP_PROJECT_ID="test"
       - ZONE="europe-west-1b"
       - MIGNAME="compute-mig"
+      - SLACK_WEBHOOK_URL="test"
+      - ELASTIC_URL="http://elasticsearch:9200"
+      - ELASTIC_USER="elastic"
+      - ELASTIC_PASSWORD="test"
+      - COOLDOWN_PERIOD_SEC=10
+      - RETRY_INTERVAL_SEC=5

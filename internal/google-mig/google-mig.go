@@ -3,15 +3,18 @@ package mig
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
+
+	"elasticsearch-vm-autoscaler/internal/elasticsearch"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	"google.golang.org/api/iterator"
 )
 
-// AddNodeToMIG aumenta el tamaño del Managed Instance Group (MIG) en 1.
-func AddNodeToMIG(projectID, zone, migName string) error {
+// AddNodeToMIG aumenta el tamaño del Managed Instance Group (MIG) en 1, si no ha alcanzado el máximo.
+func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 	ctx := context.Background()
 	client, err := compute.NewInstanceGroupManagersRESTClient(ctx)
 	if err != nil {
@@ -25,6 +28,18 @@ func AddNodeToMIG(projectID, zone, migName string) error {
 		return err
 	}
 
+	// Obtener los límites de escalado (mínimo y máximo)
+	_, maxSize, err := getMIGScalingLimits(ctx, projectID, zone, migName)
+	if err != nil {
+		return err
+	}
+
+	// Verificar si el tamaño actual está en los límites permitidos
+	if targetSize >= maxSize {
+		fmt.Printf("El tamaño del MIG ya ha alcanzado el máximo (%d), no se puede aumentar más.\n", maxSize)
+		return nil
+	}
+
 	// Crear la solicitud de redimensionamiento
 	req := &computepb.ResizeInstanceGroupManagerRequest{
 		Project:              projectID,
@@ -33,61 +48,98 @@ func AddNodeToMIG(projectID, zone, migName string) error {
 		Size:                 targetSize + 1,
 	}
 
-	_, err = client.Resize(ctx, req)
-	return err
+	if !debugMode {
+		_, err = client.Resize(ctx, req)
+		return err
+	}
+	return nil
 }
 
-// RemoveNodeFromMIG elimina una instancia aleatoria del Managed Instance Group (MIG) y reduce el tamaño en 1.
-func RemoveNodeFromMIG(projectID, zone, migName, instanceToRemove string) error {
+// RemoveNodeFromMIG reduce el tamaño del Managed Instance Group (MIG) en 1, si no ha alcanzado el mínimo.
+func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword string, debugMode bool) error {
+
 	ctx := context.Background()
-	migClient, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	client, err := compute.NewInstanceGroupManagersRESTClient(ctx)
 	if err != nil {
 		return err
 	}
-	defer migClient.Close()
+	defer client.Close()
 
-	// Construir la URL completa de la instancia
+	// Obtener el tamaño actual del MIG
+	targetSize, err := getMIGTargetSize(ctx, projectID, zone, migName)
+	if err != nil {
+		return err
+	}
+
+	// Obtener los límites de escalado (mínimo y máximo)
+	minSize, _, err := getMIGScalingLimits(ctx, projectID, zone, migName)
+	if err != nil {
+		return err
+	}
+
+	// Verificar si el tamaño actual está en los límites permitidos
+	if targetSize <= minSize {
+		fmt.Printf("El tamaño del MIG ya ha alcanzado el mínimo (%d), no se puede reducir más.\n", minSize)
+		return nil
+	}
+
+	instanceToRemove, err := GetInstanceToRemove(projectID, zone, migName)
+	if err != nil {
+		log.Printf("Error getting instance to remove: %v", err)
+		return err
+	}
+
+	if !debugMode {
+		err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
+		if err != nil {
+			log.Printf("Error draining node in Elasticsearch: %v", err)
+			return err
+		}
+	}
+
+	// Abandonar una instancia aleatoria y reducir el tamaño
 	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", projectID, zone, instanceToRemove)
-
-	// Construir la solicitud AbandonInstancesInstanceGroupManagerRequest
 	abandonReq := &computepb.AbandonInstancesInstanceGroupManagerRequest{
 		Project:              projectID,
 		Zone:                 zone,
 		InstanceGroupManager: migName,
 		InstanceGroupManagersAbandonInstancesRequestResource: &computepb.InstanceGroupManagersAbandonInstancesRequest{
-			Instances: []string{instanceURL}, // Lista de instancias en formato de URL completo
+			Instances: []string{instanceURL},
 		},
 	}
 
-	// Enviar la solicitud con el cuerpo JSON
-	migResp, err := migClient.AbandonInstances(ctx, abandonReq)
+	if !debugMode {
+		_, err = client.AbandonInstances(ctx, abandonReq)
+		return err
+	}
+	return nil
+}
+
+// getMIGScalingLimits obtiene los límites de escalado (mínimo y máximo) de un Managed Instance Group (MIG).
+func getMIGScalingLimits(ctx context.Context, projectID, zone, migName string) (int32, int32, error) {
+	client, err := compute.NewAutoscalersRESTClient(ctx)
 	if err != nil {
-		fmt.Printf("Error abandoning instance from MIG: %v", err)
-	} else {
-		fmt.Printf("Instance abandoned from MIG successfully: %v", migResp)
+		return 0, 0, fmt.Errorf("failed to create Autoscaler client: %v", err)
+	}
+	defer client.Close()
 
-		computeClient, err := compute.NewInstancesRESTClient(ctx)
-		if err != nil {
-			return err
-		}
-		defer computeClient.Close()
-
-		// Ahora eliminar la instancia permanentemente de Compute Engine
-		instanceDeleteReq := &computepb.DeleteInstanceRequest{
-			Project:  projectID,
-			Zone:     zone,
-			Instance: instanceToRemove, // Nombre de la instancia
-		}
-
-		compResp, err := computeClient.Delete(ctx, instanceDeleteReq)
-		if err != nil {
-			fmt.Printf("Error deleting instance from Compute Engine: %v", err)
-		} else {
-			fmt.Printf("Instance deleted from Compute Engine successfully: %v", compResp)
-		}
+	// Crear la solicitud para obtener el autoscaler asociado al MIG
+	req := &computepb.GetAutoscalerRequest{
+		Project:    projectID,
+		Zone:       zone,
+		Autoscaler: fmt.Sprintf("%s-autoscaler", migName), // Se asume que el nombre del autoscaler es el nombre del MIG con "-autoscaler"
 	}
 
-	return err
+	autoscaler, err := client.Get(ctx, req)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get autoscaler: %v", err)
+	}
+
+	// Obtener los límites del autoscaler
+	minSize := autoscaler.AutoscalingPolicy.MinNumReplicas
+	maxSize := autoscaler.AutoscalingPolicy.MaxNumReplicas
+
+	return *minSize, *maxSize, nil
 }
 
 // getMIGTargetSize obtiene el valor actual del targetSize de un Managed Instance Group (MIG).
