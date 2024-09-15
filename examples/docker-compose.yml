@@ -21,6 +21,8 @@ services:
       context: ../
       dockerfile: Dockerfile
     container_name: elasticsearch-vm-autoscaler
+    volumes:
+      - "./credentials.json:/tmp/credentials.json"
     depends_on:
       - prometheus
       - elasticsearch
@@ -37,4 +39,4 @@ services:
       - ELASTIC_PASSWORD="test"
       - COOLDOWN_PERIOD_SEC=10
       - RETRY_INTERVAL_SEC=5
-      #- GOOGLE_APPLICATION_CREDENTIALS=/etc/test.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
