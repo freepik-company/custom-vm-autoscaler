@@ -1,4 +1,4 @@
-package mig
+package google
 
 import (
 	"context"
@@ -15,8 +15,9 @@ import (
 
 // AddNodeToMIG aumenta el tamaño del Managed Instance Group (MIG) en 1, si no ha alcanzado el máximo.
 func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
+
 	ctx := context.Background()
-	client, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return err
 	}
@@ -59,7 +60,7 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword string, debugMode bool) error {
 
 	ctx := context.Background()
-	client, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 
 // getMIGScalingLimits obtiene los límites de escalado (mínimo y máximo) de un Managed Instance Group (MIG).
 func getMIGScalingLimits(ctx context.Context, projectID, zone, migName string) (int32, int32, error) {
-	client, err := compute.NewAutoscalersRESTClient(ctx)
+	client, err := createComputeClient(ctx, compute.NewAutoscalersRESTClient)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to create Autoscaler client: %v", err)
 	}
@@ -144,7 +145,7 @@ func getMIGScalingLimits(ctx context.Context, projectID, zone, migName string) (
 
 // getMIGTargetSize obtiene el valor actual del targetSize de un Managed Instance Group (MIG).
 func getMIGTargetSize(ctx context.Context, projectID, zone, migName string) (int32, error) {
-	client, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create Compute Engine client: %v", err)
 	}
@@ -168,11 +169,11 @@ func getMIGTargetSize(ctx context.Context, projectID, zone, migName string) (int
 
 func GetInstanceToRemove(projectID, zone, migName string) (string, error) {
 	ctx := context.Background()
-	migClient, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return "", err
 	}
-	defer migClient.Close()
+	defer client.Close()
 
 	// Obtener la lista de instancias en el MIG
 	instanceNames, err := getMIGInstanceNames(ctx, projectID, zone, migName)
@@ -190,7 +191,7 @@ func GetInstanceToRemove(projectID, zone, migName string) (string, error) {
 // getMIGInstanceNames obtiene la lista de nombres de instancias en un Managed Instance Group (MIG).
 func getMIGInstanceNames(ctx context.Context, projectID, zone, migName string) ([]string, error) {
 	// Crear cliente para la API de InstanceGroupManagers
-	client, err := compute.NewInstanceGroupManagersRESTClient(ctx)
+	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Compute Engine client: %v", err)
 	}

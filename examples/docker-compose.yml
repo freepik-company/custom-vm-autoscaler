@@ -7,6 +7,15 @@ services:
     ports:
       - "9090:9090"
 
+  elasticsearch:
+    image: elastic/elasticsearch:8.14.0
+    container_name: elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - ELASTIC_USER=elastic
+      - ELASTIC_PASSWORD=test
+    
   elasticsearch-vm-autoscaler:
     build:
       context: ../
@@ -14,6 +23,7 @@ services:
     container_name: elasticsearch-vm-autoscaler
     depends_on:
       - prometheus
+      - elasticsearch
     environment:
       - PROMETHEUS_URL=http://prometheus:9090
       - PROMETHEUS_CONDITION=rate(up{job="prometheus"}[5m]) == 1
@@ -27,3 +37,4 @@ services:
       - ELASTIC_PASSWORD="test"
       - COOLDOWN_PERIOD_SEC=10
       - RETRY_INTERVAL_SEC=5
+      #- GOOGLE_APPLICATION_CREDENTIALS=/etc/test.json

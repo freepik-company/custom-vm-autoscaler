@@ -1,7 +1,7 @@
 package main
 
 import (
-	mig "elasticsearch-vm-autoscaler/internal/google-mig"
+	"elasticsearch-vm-autoscaler/internal/google"
 	"elasticsearch-vm-autoscaler/internal/prometheus"
 	"elasticsearch-vm-autoscaler/internal/slack"
 	"log"
@@ -51,7 +51,7 @@ func main() {
 
 		if condition {
 			log.Printf("Condition %s met: Creating new node!", prometheusCondition)
-			err = mig.AddNodeToMIG(projectID, zone, migName, debugMode)
+			err = google.AddNodeToMIG(projectID, zone, migName, debugMode)
 			if err != nil {
 				log.Printf("Error adding node to MIG: %v", err)
 				time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
@@ -60,7 +60,7 @@ func main() {
 			slack.NotifySlack("Added node to MIG", slackWebhookURL)
 		} else {
 			log.Printf("Condition %s not met. Removing one node!", prometheusCondition)
-			err = mig.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
+			err = google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)
 				time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
