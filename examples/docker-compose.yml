@@ -31,9 +31,9 @@ services:
       - PROMETHEUS_UP_CONDITION=rate(up{job="prometheus"}[5m]) == 1
       - PROMETHEUS_DOWN_CONDITION=rate(up{job="prometheus"}[5m]) == 0
       - DEBUG_MODE=true
-      - GCP_PROJECT_ID=fc-se-pro-rev1
+      - GCP_PROJECT_ID=test
       - ZONE=europe-west1-d
-      - MIG_NAME=es-search-drp-as-worker-images-v3
+      - MIG_NAME=test
       - SLACK_WEBHOOK_URL="test"
       - ELASTIC_URL="http://elasticsearch:9200"
       - ELASTIC_USER="elastic"

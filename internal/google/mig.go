@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"strconv"
 
 	"elasticsearch-vm-autoscaler/internal/elasticsearch"
+	"elasticsearch-vm-autoscaler/internal/globals"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -136,8 +136,8 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 // getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG).
 func getMIGScalingLimits() (int32, int32, error) {
 	// Get min and max size from environment variables and parse to integers
-	minSize, _ := strconv.ParseInt(os.Getenv("MIN_SIZE"), 10, 32)
-	maxSize, _ := strconv.ParseInt(os.Getenv("MAX_SIZE"), 10, 32)
+	minSize, _ := strconv.ParseInt(globals.GetEnv("MIN_SIZE", "1"), 10, 32)
+	maxSize, _ := strconv.ParseInt(globals.GetEnv("MAX_SIZE", "1"), 10, 32)
 
 	return int32(minSize), int32(maxSize), nil
 }

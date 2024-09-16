@@ -19,24 +19,23 @@ This project is designed to automate the scaling of Google Cloud Managed Instanc
 ## Setup
 
 1. **Environment Variables**:
-   Ensure the following environment variables are set:
-
-   ```sh
-   PROMETHEUS_URL="http://your-prometheus-url"
-   PROMETHEUS_UP_CONDITION="your-up-condition"
-   PROMETHEUS_DOWN_CONDITION="your-down-condition"
-   GCP_PROJECT_ID="your-gcp-project-id"
-   ZONE="your-gcp-zone"
-   MIG_NAME="your-mig-name"
-   SLACK_WEBHOOK_URL="your-slack-webhook-url"
-   ELASTIC_URL="https://your-elasticsearch-url"
-   ELASTIC_USER="your-elasticsearch-user"
-   ELASTIC_PASSWORD="your-elasticsearch-password"
-   COOLDOWN_PERIOD_SEC="300"
-   RETRY_INTERVAL_SEC="30"
-   DEBUG_MODE="false"
-   MIN_SIZE="1"
-   MAX_SIZE="10"
+   You can configure the following environment variables:
+   * PROMETHEUS_URL: Prometheus to query about metrics for scaling (Default `http://localhost:9200`)
+   * PROMETHEUS_UP_CONDITION: Prometheus query that must met to scale up the nodegroup (`Required`)
+   * PROMETHEUS_DOWN_CONDITION:  Prometheus query that must met to scale down the nodegroup (`Required`)
+   * GCP_PROJECT_ID: Google Cloud project id (Default `example`)
+   * ZONE: Google Cloud project zone (Default `europe-west1-d`)
+   * MIG_NAME: Google Cloud MIG to scale (Default `example`)
+   * GOOGLE_APPLICATION_CREDENTIALS: Google Cloud service account credentials json path (`Optional`)
+   * SLACK_WEBHOOK_URL: Slack webhook to send messages about MIG scalation (`Optional`)
+   * ELASTIC_URL: Elasticsearch URL to drain nodes (Default `http://elasticsearch:9200`)
+   * ELASTIC_USER: Elasticsearch user for authentication (Default `elastic`)
+   * ELASTIC_PASSWORD: Elasticsearch password for authentication (Default `password`)
+   * COOLDOWN_PERIOD_SEC: Cooldown seconds to wait between scale checks (Default `60`)
+   * RETRY_INTERVAL_SEC: Retry timeout when an error is reached during the loop (Default `15`)
+   * DEBUG_MODE: Does not execute scalations, just log and send slack messages (Default `false`)
+   * MIN_SIZE: Minimum size for the nodegroup (Default `1`)
+   * MAX_SIZE: Maximum size for the nodegroup (Default `1`)
 
 2.	**Dependencies**:
 	•	Go modules: Ensure you have Go installed and run go mod tidy to install dependencies.
@@ -89,6 +88,12 @@ Contains functions for managing Elasticsearch nodes:
 * waitForNodeRemoval: Waits until the node is removed from the cluster.
 * shutdownServices: Stops Docker and Nomad services.
 * getHostname: Retrieves the current hostname of the node.
+
+### globals
+
+Contains global functions
+
+* GetEnv: Return environment variable value if set. If not, it returns the default value set as second argument
 
 ## License
 
