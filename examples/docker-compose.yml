@@ -31,15 +31,15 @@ services:
       - PROMETHEUS_UP_CONDITION=rate(up{job="prometheus"}[5m]) == 1
       - PROMETHEUS_DOWN_CONDITION=rate(up{job="prometheus"}[5m]) == 0
       - DEBUG_MODE=true
-      - GCP_PROJECT_ID=test
+      - GCP_PROJECT_ID=fc-se-pro-rev1
       - ZONE=europe-west1-d
-      - MIG_NAME=test
+      - MIG_NAME=es-search-drp-as-worker-images-v3
       - SLACK_WEBHOOK_URL="test"
       - ELASTIC_URL="http://elasticsearch:9200"
       - ELASTIC_USER="elastic"
       - ELASTIC_PASSWORD="test"
       - COOLDOWN_PERIOD_SEC=10
       - RETRY_INTERVAL_SEC=5
-      #- GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
       - MIN_SIZE=1
       - MAX_SIZE=2
