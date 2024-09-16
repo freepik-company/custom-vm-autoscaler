@@ -19,20 +19,20 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 	ctx := context.Background()
 	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Obtener el tamaño actual del MIG
-	targetSize, err := getMIGTargetSize(ctx, projectID, zone, migName)
+	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to get MIG target size: %v", err)
 	}
 
 	// Obtener los límites de escalado (mínimo y máximo)
 	_, maxSize, err := getMIGScalingLimits(ctx, projectID, zone, migName)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to get MIG scaling limits: %v", err)
 	}
 
 	// Verificar si el tamaño actual está en los límites permitidos
@@ -62,25 +62,25 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	ctx := context.Background()
 	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Obtener el tamaño actual del MIG
-	targetSize, err := getMIGTargetSize(ctx, projectID, zone, migName)
+	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to get MIG target size: %v", err)
 	}
 
 	// Obtener los límites de escalado (mínimo y máximo)
 	minSize, _, err := getMIGScalingLimits(ctx, projectID, zone, migName)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to get MIG scaling limits: %v", err)
 	}
 
 	// Verificar si el tamaño actual está en los límites permitidos
 	if targetSize <= minSize {
-		fmt.Printf("El tamaño del MIG ya ha alcanzado el mínimo (%d), no se puede reducir más.\n", minSize)
+		log.Printf("El tamaño del MIG ya ha alcanzado el mínimo (%d), no se puede reducir más.\n", minSize)
 		return nil
 	}
 
@@ -144,12 +144,7 @@ func getMIGScalingLimits(ctx context.Context, projectID, zone, migName string) (
 }
 
 // getMIGTargetSize obtiene el valor actual del targetSize de un Managed Instance Group (MIG).
-func getMIGTargetSize(ctx context.Context, projectID, zone, migName string) (int32, error) {
-	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create Compute Engine client: %v", err)
-	}
-	defer client.Close()
+func getMIGTargetSize(ctx context.Context, client *compute.InstanceGroupManagersClient, projectID, zone, migName string) (int32, error) {
 
 	// Obtener el Managed Instance Group (MIG)
 	req := &computepb.GetInstanceGroupManagerRequest{

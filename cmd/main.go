@@ -15,7 +15,8 @@ func main() {
 	// Prometheus variables
 	prometheusURL := os.Getenv("PROMETHEUS_URL")
 	// If the condition mets, we try to create another node
-	prometheusCondition := os.Getenv("PROMETHEUS_CONDITION")
+	prometheusUpCondition := os.Getenv("PROMETHEUS_UP_CONDITION")
+	prometheusDownCondition := os.Getenv("PROMETHEUS_DOWN_CONDITION")
 
 	// Google MIG variables
 	projectID := os.Getenv("GCP_PROJECT_ID")
@@ -42,15 +43,16 @@ func main() {
 	}
 
 	for {
-		condition, err := prometheus.GetPrometheusCondition(prometheusURL, prometheusCondition)
+		upCondition, err := prometheus.GetPrometheusCondition(prometheusURL, prometheusUpCondition)
+		downCondition, err := prometheus.GetPrometheusCondition(prometheusURL, prometheusDownCondition)
 		if err != nil {
 			log.Printf("Error querying Prometheus: %v", err)
 			time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
 			continue
 		}
 
-		if condition {
-			log.Printf("Condition %s met: Creating new node!", prometheusCondition)
+		if upCondition {
+			log.Printf("Condition %s met: Creating new node!", prometheusUpCondition)
 			err = google.AddNodeToMIG(projectID, zone, migName, debugMode)
 			if err != nil {
 				log.Printf("Error adding node to MIG: %v", err)
@@ -58,8 +60,8 @@ func main() {
 				continue
 			}
 			slack.NotifySlack("Added node to MIG", slackWebhookURL)
-		} else {
-			log.Printf("Condition %s not met. Removing one node!", prometheusCondition)
+		} else if downCondition {
+			log.Printf("Condition %s not met. Removing one node!", prometheusDownCondition)
 			err = google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)
