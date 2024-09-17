@@ -107,28 +107,30 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		}
 	}
 
-	// Create a request to abandon the selected instance and reduce the MIG size
+	// Create a request to delete the selected instance and reduce the MIG size
 	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", projectID, zone, instanceToRemove)
-	abandonReq := &computepb.AbandonInstancesInstanceGroupManagerRequest{
+	deleteReq := &computepb.DeleteInstancesInstanceGroupManagerRequest{
 		Project:              projectID,
 		Zone:                 zone,
 		InstanceGroupManager: migName,
-		InstanceGroupManagersAbandonInstancesRequestResource: &computepb.InstanceGroupManagersAbandonInstancesRequest{
+		InstanceGroupManagersDeleteInstancesRequestResource: &computepb.InstanceGroupManagersDeleteInstancesRequest{
 			Instances: []string{instanceURL},
 		},
 	}
 
-	// Abandon the instance if not in debug mode
+	// Delete the instance if not in debug mode
 	if !debugMode {
-		_, err = client.AbandonInstances(ctx, abandonReq)
-		return err
+		_, err = client.DeleteInstances(ctx, deleteReq)
+		if err != nil {
+			log.Fatalf("Error deleting instance: %v", err)
+		}
 	}
 
 	// If not in debug mode, remove the elasticsearch node from cluster settings
 	if !debugMode {
 		err = elasticsearch.ClearElasticsearchClusterSettings(elasticURL, elasticUser, elasticPassword)
 		if err != nil {
-			log.Printf("Error clearing Elasticsearch cluster settings: %v", err)
+			log.Fatalf("Error clearing Elasticsearch cluster settings: %v", err)
 			return err
 		}
 	}
