@@ -27,6 +27,19 @@ type NodeInfo struct {
 	Name        string `json:"name"`
 }
 
+// shardInfo struct for elasticsearch shards
+type ShardInfo struct {
+	Index   string `json:"index"`
+	Shard   string `json:"shard"`
+	PriRep  string `json:"prirep"`
+	State   string `json:"state"`
+	Docs    string `json:"docs"`
+	Store   string `json:"store"`
+	Dataset string `json:"dataset"`
+	IP      string `json:"ip"`
+	Node    string `json:"node"`
+}
+
 // DrainElasticsearchNode drains an Elasticsearch node and performs a controlled shutdown.
 // elasticURL: The URL of the Elasticsearch cluster.
 // nodeName: The name of the node to shut down.
@@ -140,21 +153,28 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 	for {
 		res, err := es.Cat.Shards(
 			es.Cat.Shards.WithFormat("json"),
+			es.Cat.Shards.WithV(true),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to get shards information: %w", err)
 		}
 		defer res.Body.Close()
 
-		var shards []map[string]interface{}
-		if err := json.NewDecoder(res.Body).Decode(&shards); err != nil {
-			return fmt.Errorf("failed to decode shards information: %w", err)
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("error reading response body: %w", err)
+		}
+
+		var shards []ShardInfo
+		err = json.Unmarshal([]byte(string(body)), &shards)
+		if err != nil {
+			return fmt.Errorf("error deserializing JSON: %w", err)
 		}
 
 		nodeFound := false
 		for _, shard := range shards {
 			// Assuming `node` field contains the node name
-			if node, ok := shard["node"].(string); ok && strings.Contains(node, nodeName) {
+			if strings.Contains(shard.Node, nodeName) {
 				nodeFound = true
 				break
 			}
