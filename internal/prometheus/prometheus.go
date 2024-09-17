@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -47,9 +46,8 @@ func GetPrometheusCondition(prometheusURL, prometheusCondition string) (bool, er
 		vector := result.(model.Vector)
 		// If the vector has results, check the first value
 		if len(vector) > 0 {
-			value, _ := strconv.ParseInt(vector[0].Value.String(), 10, 32)
-			// Return true if the value is 0, which indicates the condition is met
-			return value == 1, nil
+			// Return true if vector has any value, which indicates the condition is met
+			return true, nil
 		} else {
 			// No values returned, so the condition is not met
 			return false, nil
