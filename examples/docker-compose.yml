@@ -38,8 +38,8 @@ services:
       - ELASTIC_URL=https://elasticsearch:9200
       - ELASTIC_USER=elastic
       - ELASTIC_PASSWORD=test
-      - COOLDOWN_PERIOD_SEC=10
-      - RETRY_INTERVAL_SEC=5
+      - COOLDOWN_PERIOD_SEC=30
+      - RETRY_INTERVAL_SEC=30
       - GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
       - MIN_SIZE=1
       - MAX_SIZE=2

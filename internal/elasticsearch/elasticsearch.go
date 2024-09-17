@@ -8,7 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
@@ -89,7 +89,6 @@ func DrainElasticsearchNode(elasticURL, nodeName, username, password string) err
 // getNodeIP retrieves the IP address of the Elasticsearch node.
 func getNodeIP(es *elasticsearch.Client, nodeName string) (string, error) {
 
-	nodeName = "63fc4f0dd9ab"
 	// Request to get the nodes information
 	res, err := es.Cat.Nodes(
 		es.Cat.Nodes.WithFormat("json"),
@@ -154,6 +153,12 @@ func updateClusterSettings(es *elasticsearch.Client, nodeIP string) error {
 // waitForNodeRemoval waits for the node to be removed from the cluster.
 func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 
+	// Prepare regex to match shards with
+	re, err := regexp.Compile(nodeName)
+	if err != nil {
+		log.Fatalf("Error compilando regex: %v", err)
+	}
+
 	for {
 		res, err := es.Cat.Shards(
 			es.Cat.Shards.WithFormat("json"),
@@ -169,7 +174,6 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 			return fmt.Errorf("error reading response body: %w", err)
 		}
 
-		fmt.Println(string(body))
 		var shards []ShardInfo
 		err = json.Unmarshal([]byte(string(body)), &shards)
 		if err != nil {
@@ -178,15 +182,14 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 
 		nodeFound := false
 		for _, shard := range shards {
-			log.Printf("Shard: %s, Node: %s", shard.Index, shard.Node)
 			// Assuming `node` field contains the node name
-			if strings.Contains(shard.Node, nodeName) {
+			if re.MatchString(shard.Node) {
 				nodeFound = true
-				break
 			}
 		}
 
 		if !nodeFound {
+			log.Printf("node %s is fully empty and ready to delete", nodeName)
 			break
 		}
 

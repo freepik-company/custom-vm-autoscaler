@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"time"
 
 	"elasticsearch-vm-autoscaler/internal/elasticsearch"
 	"elasticsearch-vm-autoscaler/internal/globals"
@@ -120,6 +121,9 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		if err != nil {
 			return fmt.Errorf("error deleting instance: %v", err)
 		}
+		// Wait 90 seconds until instance is fully deleted
+		// Google Cloud has a deletion timeout of 90 seconds max
+		time.Sleep(90 * time.Second)
 	}
 
 	// If not in debug mode, remove the elasticsearch node from cluster settings

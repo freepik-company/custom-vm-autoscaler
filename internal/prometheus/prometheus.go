@@ -21,7 +21,7 @@ type customTransport struct {
 // RoundTrip executes a single HTTP transaction and adds custom headers.
 func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Add custom headers from environment variables
-	if orgIdHeader := os.Getenv("X-SCOPE-ORGID_HEADER"); orgIdHeader != "" {
+	if orgIdHeader := os.Getenv("X_SCOPE_ORGID_HEADER"); orgIdHeader != "" {
 		req.Header.Set("X-Scope-OrgID", orgIdHeader)
 	}
 	return t.Transport.RoundTrip(req)
