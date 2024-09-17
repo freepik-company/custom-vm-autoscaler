@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -11,13 +13,35 @@ import (
 	"github.com/prometheus/common/model"
 )
 
+// customTransport is an HTTP transport that adds custom headers to requests.
+type customTransport struct {
+	Transport http.RoundTripper
+}
+
+// RoundTrip executes a single HTTP transaction and adds custom headers.
+func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Add custom headers from environment variables
+	if orgIdHeader := os.Getenv("X-SCOPE-ORGID_HEADER"); orgIdHeader != "" {
+		req.Header.Set("X-Scope-OrgID", orgIdHeader)
+	}
+	return t.Transport.RoundTrip(req)
+}
+
 // GetPrometheusCondition executes a Prometheus query and checks if the condition is true.
 // prometheusURL: The URL of the Prometheus server.
 // prometheusCondition: The Prometheus query condition to be evaluated.
 func GetPrometheusCondition(prometheusURL, prometheusCondition string) (bool, error) {
+
+	// Create a custom HTTP client with the custom transport
+	httpClient := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &customTransport{Transport: http.DefaultTransport},
+	}
+
 	// Create a Prometheus API client
 	client, err := api.NewClient(api.Config{
 		Address: prometheusURL, // Set the Prometheus server address
+		Client:  httpClient,
 	})
 	if err != nil {
 		// Return an error if the client fails to be created

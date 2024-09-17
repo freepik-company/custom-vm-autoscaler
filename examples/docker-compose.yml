@@ -43,3 +43,4 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
       - MIN_SIZE=1
       - MAX_SIZE=2
+      - X-SCOPE-ORGID_HEADER=test
