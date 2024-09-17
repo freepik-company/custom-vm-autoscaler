@@ -41,8 +41,7 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 
 	// Check if the MIG has reached its maximum size
 	if targetSize >= maxSize {
-		fmt.Printf("MIG has reached its maximum size (%d), no further scaling is possible.\n", maxSize)
-		return nil
+		return fmt.Errorf("MIG has reached its maximum size (%d), no further scaling is possible.\n", maxSize)
 	}
 
 	// Create a request to resize the MIG by increasing the target size by 1
@@ -86,15 +85,13 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 
 	// Check if the MIG has reached its minimum size
 	if targetSize <= minSize {
-		log.Printf("MIG has reached the minimum size (%d/%d), no further scaling down is possible.\n", targetSize, minSize)
-		return nil
+		return fmt.Errorf("MIG has reached the minimum size (%d/%d), no further scaling down is possible.\n", targetSize, minSize)
 	}
 
 	// Get a random instance from the MIG to remove
 	instanceToRemove, err := GetInstanceToRemove(ctx, client, projectID, zone, migName)
 	if err != nil {
-		log.Printf("Error getting instance to remove: %v", err)
-		return err
+		return fmt.Errorf("error draining Elasticsearch node: %v", err)
 	}
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
@@ -102,8 +99,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		log.Printf("Instance to remove: %s", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
 		if err != nil {
-			log.Printf("Error draining Elasticsearch node: %v", err)
-			return err
+			return fmt.Errorf("error draining Elasticsearch node: %v", err)
 		}
 	}
 
@@ -122,7 +118,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	if !debugMode {
 		_, err = client.DeleteInstances(ctx, deleteReq)
 		if err != nil {
-			log.Fatalf("Error deleting instance: %v", err)
+			return fmt.Errorf("error deleting instance: %v", err)
 		}
 	}
 
@@ -130,8 +126,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	if !debugMode {
 		err = elasticsearch.ClearElasticsearchClusterSettings(elasticURL, elasticUser, elasticPassword)
 		if err != nil {
-			log.Fatalf("Error clearing Elasticsearch cluster settings: %v", err)
-			return err
+			return fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
 		}
 	}
 

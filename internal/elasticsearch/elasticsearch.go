@@ -112,7 +112,9 @@ func getNodeIP(es *elasticsearch.Client, nodeName string) (string, error) {
 	// Find the IP address for the node with the hostname
 	for _, node := range nodes {
 		if node.Name == nodeName {
-			return node.IP, nil
+			if node.IP != "" {
+				return node.IP, nil
+			}
 		}
 	}
 
