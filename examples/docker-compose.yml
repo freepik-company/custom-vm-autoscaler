@@ -28,8 +28,8 @@ services:
       - elasticsearch
     environment:
       - PROMETHEUS_URL=http://prometheus:9090
-      - PROMETHEUS_UP_CONDITION=rate(up{job="prometheus"}[5m]) == 1
-      - PROMETHEUS_DOWN_CONDITION=rate(up{job="prometheus"}[5m]) == 0
+      - PROMETHEUS_UP_CONDITION=avg_over_time(up{job="prometheus"}[5m]) > 0.8
+      - PROMETHEUS_DOWN_CONDITION=avg_over_time(up{job="prometheus"}[5m]) < 0.6
       - DEBUG_MODE=true
       - GCP_PROJECT_ID=test
       - ZONE=europe-west1-d
