@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -88,6 +89,7 @@ func DrainElasticsearchNode(elasticURL, nodeName, username, password string) err
 // getNodeIP retrieves the IP address of the Elasticsearch node.
 func getNodeIP(es *elasticsearch.Client, nodeName string) (string, error) {
 
+	nodeName = "63fc4f0dd9ab"
 	// Request to get the nodes information
 	res, err := es.Cat.Nodes(
 		es.Cat.Nodes.WithFormat("json"),
@@ -163,10 +165,11 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 		defer res.Body.Close()
 
 		body, err := io.ReadAll(res.Body)
-		if err != nil {
+		if err != nil || string(body) == "" {
 			return fmt.Errorf("error reading response body: %w", err)
 		}
 
+		fmt.Println(string(body))
 		var shards []ShardInfo
 		err = json.Unmarshal([]byte(string(body)), &shards)
 		if err != nil {
@@ -175,6 +178,7 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 
 		nodeFound := false
 		for _, shard := range shards {
+			log.Printf("Shard: %s, Node: %s", shard.Index, shard.Node)
 			// Assuming `node` field contains the node name
 			if strings.Contains(shard.Node, nodeName) {
 				nodeFound = true
@@ -211,9 +215,9 @@ func ClearElasticsearchClusterSettings(elasticURL, username, password string) er
 		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
 
-	settings := map[string]map[string]string{
+	settings := map[string]map[string]any{
 		"persistent": {
-			"cluster.routing.allocation.exclude._ip": "",
+			"cluster.routing.allocation.exclude._ip": nil,
 		},
 	}
 
