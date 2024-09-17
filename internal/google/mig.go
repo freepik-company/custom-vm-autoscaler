@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 
 	"elasticsearch-vm-autoscaler/internal/elasticsearch"
 	"elasticsearch-vm-autoscaler/internal/globals"
@@ -98,6 +99,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
 	if !debugMode {
+		log.Printf("Instance to remove: %s", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
 		if err != nil {
 			log.Printf("Error draining Elasticsearch node: %v", err)
@@ -116,6 +118,12 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		},
 	}
 
+	// Abandon the instance if not in debug mode
+	if !debugMode {
+		_, err = client.AbandonInstances(ctx, abandonReq)
+		return err
+	}
+
 	// If not in debug mode, remove the elasticsearch node from cluster settings
 	if !debugMode {
 		err = elasticsearch.ClearElasticsearchClusterSettings(elasticURL, elasticUser, elasticPassword)
@@ -125,11 +133,6 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		}
 	}
 
-	// Abandon the instance if not in debug mode
-	if !debugMode {
-		_, err = client.AbandonInstances(ctx, abandonReq)
-		return err
-	}
 	return nil
 }
 
@@ -161,6 +164,16 @@ func getMIGTargetSize(ctx context.Context, client *compute.InstanceGroupManagers
 	return mig.GetTargetSize(), nil
 }
 
+// getInstanceNameFromURL parses the Google Cloud instance name to get just the hostname
+// and not the full path
+func getInstanceNameFromURL(instanceURL string) string {
+	parts := strings.Split(instanceURL, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return ""
+}
+
 // GetInstanceToRemove retrieves a random instance from the MIG to be removed.
 func GetInstanceToRemove(ctx context.Context, client *compute.InstanceGroupManagersClient, projectID, zone, migName string) (string, error) {
 	// Get the list of instances in the MIG
@@ -173,7 +186,7 @@ func GetInstanceToRemove(ctx context.Context, client *compute.InstanceGroupManag
 	}
 
 	// Randomly select an instance to remove
-	return instanceNames[rand.Intn(len(instanceNames))], nil
+	return getInstanceNameFromURL(instanceNames[rand.Intn(len(instanceNames))]), nil
 }
 
 // getMIGInstanceNames retrieves the list of instance names in a Managed Instance Group (MIG).

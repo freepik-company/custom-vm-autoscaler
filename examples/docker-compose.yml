@@ -35,12 +35,12 @@ services:
       - ZONE=europe-west1-d
       - MIG_NAME=test
       - SLACK_WEBHOOK_URL="test"
-      - ELASTIC_URL="http://elasticsearch:9200"
-      - ELASTIC_USER="elastic"
-      - ELASTIC_PASSWORD="test"
+      - ELASTIC_URL=https://elasticsearch:9200
+      - ELASTIC_USER=elastic
+      - ELASTIC_PASSWORD=test
       - COOLDOWN_PERIOD_SEC=10
       - RETRY_INTERVAL_SEC=5
       - GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
       - MIN_SIZE=1
       - MAX_SIZE=2
-      - X-SCOPE-ORGID_HEADER=test
+      #- X-SCOPE-ORGID_HEADER=test
