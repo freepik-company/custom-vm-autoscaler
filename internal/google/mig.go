@@ -33,6 +33,7 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to get MIG target size: %v", err)
 	}
+	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
 	_, maxSize, err := getMIGScalingLimits()
@@ -42,7 +43,7 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 
 	// Check if the MIG has reached its maximum size
 	if targetSize >= maxSize {
-		return fmt.Errorf("MIG has reached its maximum size (%d), no further scaling is possible.\n", maxSize)
+		return fmt.Errorf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
 	}
 
 	// Create a request to resize the MIG by increasing the target size by 1
@@ -56,7 +57,11 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 	// Resize the MIG if not in debug mode
 	if !debugMode {
 		_, err = client.Resize(ctx, req)
-		return err
+		if err != nil {
+			return err
+		} else {
+			log.Printf("Scaled up MIG successfully %d/%d", targetSize+1, maxSize)
+		}
 	}
 	return nil
 }
@@ -77,6 +82,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	if err != nil {
 		return fmt.Errorf("failed to get MIG target size: %v", err)
 	}
+	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
 	minSize, _, err := getMIGScalingLimits()
@@ -86,7 +92,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 
 	// Check if the MIG has reached its minimum size
 	if targetSize <= minSize {
-		return fmt.Errorf("MIG has reached the minimum size (%d/%d), no further scaling down is possible.\n", targetSize, minSize)
+		return fmt.Errorf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
 	}
 
 	// Get a random instance from the MIG to remove
@@ -97,11 +103,12 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
 	if !debugMode {
-		log.Printf("Instance to remove: %s", instanceToRemove)
+		log.Printf("Instance to remove: %s. Draining from elasticsearch cluster", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
 		if err != nil {
 			return fmt.Errorf("error draining Elasticsearch node: %v", err)
 		}
+		log.Printf("Instance drained successfully from elasticsearch cluster")
 	}
 
 	// Create a request to delete the selected instance and reduce the MIG size
@@ -120,6 +127,8 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		_, err = client.DeleteInstances(ctx, deleteReq)
 		if err != nil {
 			return fmt.Errorf("error deleting instance: %v", err)
+		} else {
+			log.Printf("Scaled down MIG successfully %d/%d", targetSize-1, minSize)
 		}
 		// Wait 90 seconds until instance is fully deleted
 		// Google Cloud has a deletion timeout of 90 seconds max
@@ -132,6 +141,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		if err != nil {
 			return fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
 		}
+		log.Printf("Cleared up elasticsearch settings for draining node")
 	}
 
 	return nil
@@ -258,7 +268,11 @@ func CheckMIGMinimumSize(projectID, zone, migName string, debugMode bool) error 
 		// Resize the MIG if not in debug mode
 		if !debugMode {
 			_, err = client.Resize(ctx, req)
-			return err
+			if err != nil {
+				return err
+			} else {
+				log.Printf("Scaled up MIG to its minimum size %d/%d", minSize, minSize)
+			}
 		}
 	}
 	return nil

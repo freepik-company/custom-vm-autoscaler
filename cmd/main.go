@@ -5,6 +5,7 @@ import (
 	"elasticsearch-vm-autoscaler/internal/google"
 	"elasticsearch-vm-autoscaler/internal/prometheus"
 	"elasticsearch-vm-autoscaler/internal/slack"
+
 	"log"
 	"os"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 )
 
 func main() {
+
 	// Prometheus variables to hold configuration for scaling conditions
 	prometheusURL := globals.GetEnv("PROMETHEUS_URL", "http://localhost:9090")
 	// Conditions for scaling up or down the MIG
@@ -40,7 +42,7 @@ func main() {
 
 	// Cooldown and retry intervals in seconds, parsed from environment variables
 	cooldownPeriodSeconds, _ := strconv.ParseInt(globals.GetEnv("COOLDOWN_PERIOD_SEC", "60"), 10, 64)
-	retryIntervalSeconds, _ := strconv.ParseInt(globals.GetEnv("RETRY_INTERVAL_SEC", "15"), 10, 64)
+	retryIntervalSeconds, _ := strconv.ParseInt(globals.GetEnv("RETRY_INTERVAL_SEC", "60"), 10, 64)
 
 	// Debug mode flag, enabled if "DEBUG_MODE" is set to "true"
 	debugModeStr := globals.GetEnv("DEBUG_MODE", "false")
@@ -53,19 +55,20 @@ func main() {
 
 	// Main loop to monitor scaling conditions and manage the MIG
 	for {
-		// Check if the MIG is at its minimum size
+		// Check if the MIG is at its minimum size at least. If not, scale it up to minSize
 		err := google.CheckMIGMinimumSize(projectID, zone, migName, debugMode)
 		if err != nil {
 			log.Printf("Error checking minimum size for MIG nodes: %v", err)
 		}
 
-		// Fetch the up and down conditions from Prometheus
+		// Fetch the scale up and down conditions from Prometheus
 		upCondition, err := prometheus.GetPrometheusCondition(prometheusURL, prometheusUpCondition)
 		if err != nil {
 			log.Printf("Error querying Prometheus: %v", err)
 			time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
 			continue
 		}
+
 		downCondition, err := prometheus.GetPrometheusCondition(prometheusURL, prometheusDownCondition)
 		if err != nil {
 			log.Printf("Error querying Prometheus: %v", err)
@@ -75,7 +78,7 @@ func main() {
 
 		// If the up condition is met, add a node to the MIG
 		if upCondition {
-			log.Printf("Condition %s met: Creating new node!", prometheusUpCondition)
+			log.Printf("Up condition %s met: Trying to create a new node!", prometheusUpCondition)
 			err = google.AddNodeToMIG(projectID, zone, migName, debugMode)
 			if err != nil {
 				log.Printf("Error adding node to MIG: %v", err)
@@ -84,10 +87,10 @@ func main() {
 			}
 			// Notify via Slack that a node has been added
 			if slackWebhookURL != "" {
-				slack.NotifySlack("Added node to MIG", slackWebhookURL)
+				slack.NotifySlack("New node created succesfully in MIG", slackWebhookURL)
 			}
 		} else if downCondition { // If the down condition is met, remove a node from the MIG
-			log.Printf("Condition %s met. Removing one node!", prometheusDownCondition)
+			log.Printf("Down condition %s met. Trying to remove one node!", prometheusDownCondition)
 			err = google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)

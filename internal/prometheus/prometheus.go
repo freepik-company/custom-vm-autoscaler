@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -20,10 +21,20 @@ type customTransport struct {
 
 // RoundTrip executes a single HTTP transaction and adds custom headers.
 func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Add custom headers from environment variables
-	if orgIdHeader := os.Getenv("X_SCOPE_ORGID_HEADER"); orgIdHeader != "" {
-		req.Header.Set("X-Scope-OrgID", orgIdHeader)
+	// Get all environment vars
+	for _, env := range os.Environ() {
+		// Split in key value
+		pair := strings.SplitN(env, "=", 2)
+		key := pair[0]
+		value := pair[1]
+
+		// If the variable has the prefix PROMETHEUS_HEADER_, add it as a header
+		if strings.HasPrefix(key, "PROMETHEUS_HEADER_") {
+			headerName := strings.ReplaceAll(key[len("PROMETHEUS_HEADER_"):], "_", "-")
+			req.Header.Set(headerName, value)
+		}
 	}
+
 	return t.Transport.RoundTrip(req)
 }
 

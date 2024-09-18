@@ -3,13 +3,13 @@ package elasticsearch
 import (
 	"bytes"
 	"crypto/tls"
+	"elasticsearch-vm-autoscaler/internal/globals"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"regexp"
-	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 )
@@ -48,11 +48,19 @@ type ShardInfo struct {
 // password: The password for basic authentication.
 func DrainElasticsearchNode(elasticURL, nodeName, username, password string) error {
 
-	// Configurar http.Transport para desactivar la verificación del certificado
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	// Check ELASTIC_SSL_INSECURE_SKIP_VERIFY environment variable to skip SSL certificate validation
+	// for elasticsearch
+	insecureSkipVerify := globals.GetEnv("ELASTIC_SSL_INSECURE_SKIP_VERIFY", "false")
+	var tr http.RoundTripper
+	if insecureSkipVerify == "true" {
+		tr = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	} else {
+		tr = http.DefaultTransport
 	}
 
+	// Create elasticsearch config for connection
 	cfg := elasticsearch.Config{
 		Addresses: []string{elasticURL},
 		Username:  username,
@@ -60,18 +68,19 @@ func DrainElasticsearchNode(elasticURL, nodeName, username, password string) err
 		Transport: tr,
 	}
 
+	// Creates new client
 	es, err := elasticsearch.NewClient(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
 
-	// Get Elasticsearch node IP
+	// Get Elasticsearch node IP using the nodeName to delete
 	nodeIP, err := getNodeIP(es, nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to get node IP: %w", err)
 	}
 
-	// Exclude the node from routing allocations
+	// Exclude the node IP from routing allocations
 	err = updateClusterSettings(es, nodeIP)
 	if err != nil {
 		return fmt.Errorf("failed to update cluster settings: %w", err)
@@ -99,11 +108,13 @@ func getNodeIP(es *elasticsearch.Client, nodeName string) (string, error) {
 	}
 	defer res.Body.Close()
 
+	// Reads the response
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return "", fmt.Errorf("error reading response body: %w", err)
 	}
 
+	// Parse response in JSON
 	var nodes []NodeInfo
 	err = json.Unmarshal([]byte(string(body)), &nodes)
 	if err != nil {
@@ -125,17 +136,20 @@ func getNodeIP(es *elasticsearch.Client, nodeName string) (string, error) {
 // updateClusterSettings updates the cluster settings to exclude a specific node IP.
 func updateClusterSettings(es *elasticsearch.Client, nodeIP string) error {
 
+	// _cluster/settings to set
 	settings := map[string]map[string]string{
 		"persistent": {
 			"cluster.routing.allocation.exclude._ip": nodeIP,
 		},
 	}
 
+	// Parse settings in JSON
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings to JSON: %w", err)
 	}
 
+	// Execute PUT _cluster/settings command
 	req := bytes.NewReader(data)
 	res, err := es.Cluster.PutSettings(req)
 	if err != nil {
@@ -160,6 +174,7 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 	}
 
 	for {
+		// Get _cat/shards to check if nodeName has any shard inside
 		res, err := es.Cat.Shards(
 			es.Cat.Shards.WithFormat("json"),
 			es.Cat.Shards.WithV(true),
@@ -169,31 +184,33 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 		}
 		defer res.Body.Close()
 
+		// Get response
 		body, err := io.ReadAll(res.Body)
 		if err != nil || string(body) == "" {
 			return fmt.Errorf("error reading response body: %w", err)
 		}
 
+		// Parse response in JSON
 		var shards []ShardInfo
 		err = json.Unmarshal([]byte(string(body)), &shards)
 		if err != nil {
 			return fmt.Errorf("error deserializing JSON: %w", err)
 		}
 
+		// Check if nodeName has any shards inside it
 		nodeFound := false
 		for _, shard := range shards {
-			// Assuming `node` field contains the node name
 			if re.MatchString(shard.Node) {
 				nodeFound = true
 			}
 		}
 
+		// If nodeFound is false, there are not any shard inside it. It is ready to delete
 		if !nodeFound {
 			log.Printf("node %s is fully empty and ready to delete", nodeName)
 			break
 		}
 
-		time.Sleep(10 * time.Second)
 	}
 
 	return nil
@@ -201,11 +218,20 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 
 // clearClusterSettings removes the node exclusion from cluster settings.
 func ClearElasticsearchClusterSettings(elasticURL, username, password string) error {
-	// Configurar http.Transport para desactivar la verificación del certificado
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+
+	// Check ELASTIC_SSL_INSECURE_SKIP_VERIFY environment variable to skip SSL certificate validation
+	// for elasticsearch
+	insecureSkipVerify := globals.GetEnv("ELASTIC_SSL_INSECURE_SKIP_VERIFY", "false")
+	var tr http.RoundTripper
+	if insecureSkipVerify == "true" {
+		tr = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	} else {
+		tr = http.DefaultTransport
 	}
 
+	// Configure elasticsearch connection
 	cfg := elasticsearch.Config{
 		Addresses: []string{elasticURL},
 		Username:  username,
@@ -213,22 +239,26 @@ func ClearElasticsearchClusterSettings(elasticURL, username, password string) er
 		Transport: tr,
 	}
 
+	// Create elastic client
 	es, err := elasticsearch.NewClient(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
 
+	// _cluster/settings to set after the node deletion
 	settings := map[string]map[string]any{
 		"persistent": {
 			"cluster.routing.allocation.exclude._ip": nil,
 		},
 	}
 
+	// Parse in JSON
 	data, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings to JSON: %w", err)
 	}
 
+	// Execute PUT _cluster/settings
 	req := bytes.NewReader(data)
 	res, err := es.Cluster.PutSettings(req)
 	if err != nil {
