@@ -5,6 +5,7 @@ import (
 	"elasticsearch-vm-autoscaler/internal/google"
 	"elasticsearch-vm-autoscaler/internal/prometheus"
 	"elasticsearch-vm-autoscaler/internal/slack"
+	"fmt"
 
 	"log"
 	"os"
@@ -79,7 +80,7 @@ func main() {
 		// If the up condition is met, add a node to the MIG
 		if upCondition {
 			log.Printf("Up condition %s met: Trying to create a new node!", prometheusUpCondition)
-			err = google.AddNodeToMIG(projectID, zone, migName, debugMode)
+			currentSize, maxSize, err := google.AddNodeToMIG(projectID, zone, migName, debugMode)
 			if err != nil {
 				log.Printf("Error adding node to MIG: %v", err)
 				time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
@@ -87,11 +88,12 @@ func main() {
 			}
 			// Notify via Slack that a node has been added
 			if slackWebhookURL != "" {
-				slack.NotifySlack("New node created succesfully in MIG", slackWebhookURL)
+				message := fmt.Sprintf("Added new node to MIG %s. Current size is %d nodes and the maximum nodes to create are %d", migName, currentSize, maxSize)
+				slack.NotifySlack(message, slackWebhookURL)
 			}
 		} else if downCondition { // If the down condition is met, remove a node from the MIG
 			log.Printf("Down condition %s met. Trying to remove one node!", prometheusDownCondition)
-			err = google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
+			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)
 				time.Sleep(time.Duration(retryIntervalSeconds) * time.Second)
@@ -99,7 +101,8 @@ func main() {
 			}
 			// Notify via Slack that a node has been removed
 			if slackWebhookURL != "" {
-				slack.NotifySlack("Removed node from MIG", slackWebhookURL)
+				message := fmt.Sprintf("Removed node %s from MIG %s. Current size is %d nodes and the minimum nodes to exist are %d", nodeRemoved, migName, currentSize, minSize)
+				slack.NotifySlack(message, slackWebhookURL)
 			}
 		} else {
 			// No scaling conditions met, so no changes to the MIG

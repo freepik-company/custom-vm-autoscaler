@@ -18,32 +18,32 @@ import (
 )
 
 // AddNodeToMIG increases the size of the Managed Instance Group (MIG) by 1, if it has not reached the maximum limit.
-func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
+func AddNodeToMIG(projectID, zone, migName string, debugMode bool) (int32, int32, error) {
 	ctx := context.Background()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+		return 0, 0, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
 	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
 	if err != nil {
-		return fmt.Errorf("failed to get MIG target size: %v", err)
+		return 0, 0, fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
 	_, maxSize, err := getMIGScalingLimits()
 	if err != nil {
-		return fmt.Errorf("failed to get MIG scaling limits: %v", err)
+		return 0, 0, fmt.Errorf("failed to get MIG scaling limits: %v", err)
 	}
 
 	// Check if the MIG has reached its maximum size
 	if targetSize >= maxSize {
-		return fmt.Errorf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
+		return 0, 0, fmt.Errorf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
 	}
 
 	// Create a request to resize the MIG by increasing the target size by 1
@@ -58,47 +58,47 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) error {
 	if !debugMode {
 		_, err = client.Resize(ctx, req)
 		if err != nil {
-			return err
+			return 0, 0, err
 		} else {
 			log.Printf("Scaled up MIG successfully %d/%d", targetSize+1, maxSize)
 		}
 	}
-	return nil
+	return targetSize + 1, maxSize, nil
 }
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
-func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword string, debugMode bool) error {
+func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword string, debugMode bool) (int32, int32, string, error) {
 	ctx := context.Background()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+		return 0, 0, "", fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
 	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
 	if err != nil {
-		return fmt.Errorf("failed to get MIG target size: %v", err)
+		return 0, 0, "", fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
 	minSize, _, err := getMIGScalingLimits()
 	if err != nil {
-		return fmt.Errorf("failed to get MIG scaling limits: %v", err)
+		return 0, 0, "", fmt.Errorf("failed to get MIG scaling limits: %v", err)
 	}
 
 	// Check if the MIG has reached its minimum size
 	if targetSize <= minSize {
-		return fmt.Errorf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
+		return 0, 0, "", fmt.Errorf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
 	}
 
 	// Get a random instance from the MIG to remove
 	instanceToRemove, err := GetInstanceToRemove(ctx, client, projectID, zone, migName)
 	if err != nil {
-		return fmt.Errorf("error draining Elasticsearch node: %v", err)
+		return 0, 0, "", fmt.Errorf("error draining Elasticsearch node: %v", err)
 	}
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
@@ -106,7 +106,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		log.Printf("Instance to remove: %s. Draining from elasticsearch cluster", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
 		if err != nil {
-			return fmt.Errorf("error draining Elasticsearch node: %v", err)
+			return 0, 0, "", fmt.Errorf("error draining Elasticsearch node: %v", err)
 		}
 		log.Printf("Instance drained successfully from elasticsearch cluster")
 	}
@@ -126,7 +126,7 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	if !debugMode {
 		_, err = client.DeleteInstances(ctx, deleteReq)
 		if err != nil {
-			return fmt.Errorf("error deleting instance: %v", err)
+			return 0, 0, "", fmt.Errorf("error deleting instance: %v", err)
 		} else {
 			log.Printf("Scaled down MIG successfully %d/%d", targetSize-1, minSize)
 		}
@@ -139,12 +139,12 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	if !debugMode {
 		err = elasticsearch.ClearElasticsearchClusterSettings(elasticURL, elasticUser, elasticPassword)
 		if err != nil {
-			return fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
+			return 0, 0, "", fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
 		}
 		log.Printf("Cleared up elasticsearch settings for draining node")
 	}
 
-	return nil
+	return targetSize - 1, minSize, instanceToRemove, nil
 }
 
 // getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG).
