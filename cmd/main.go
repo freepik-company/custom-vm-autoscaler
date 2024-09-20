@@ -42,7 +42,8 @@ func main() {
 	elasticPassword := globals.GetEnv("ELASTIC_PASSWORD", "password")
 
 	// Cooldown and retry intervals in seconds, parsed from environment variables
-	cooldownPeriodSeconds, _ := strconv.ParseInt(globals.GetEnv("COOLDOWN_PERIOD_SEC", "60"), 10, 64)
+	scaledowncooldownPeriodSeconds, _ := strconv.ParseInt(globals.GetEnv("SCALEDOWN_COOLDOWN_PERIOD_SEC", "60"), 10, 64)
+	defaultcooldownPeriodSeconds, _ := strconv.ParseInt(globals.GetEnv("DEFAULT_COOLDOWN_PERIOD_SEC", "60"), 10, 64)
 	retryIntervalSeconds, _ := strconv.ParseInt(globals.GetEnv("RETRY_INTERVAL_SEC", "60"), 10, 64)
 
 	// Debug mode flag, enabled if "DEBUG_MODE" is set to "true"
@@ -91,6 +92,8 @@ func main() {
 				message := fmt.Sprintf("Added new node to MIG %s. Current size is %d nodes and the maximum nodes to create are %d", migName, currentSize, maxSize)
 				slack.NotifySlack(message, slackWebhookURL)
 			}
+			// Sleep for the default cooldown period before checking the conditions again
+			time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
 		} else if downCondition { // If the down condition is met, remove a node from the MIG
 			log.Printf("Down condition %s met. Trying to remove one node!", prometheusDownCondition)
 			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
@@ -104,12 +107,13 @@ func main() {
 				message := fmt.Sprintf("Removed node %s from MIG %s. Current size is %d nodes and the minimum nodes to exist are %d", nodeRemoved, migName, currentSize, minSize)
 				slack.NotifySlack(message, slackWebhookURL)
 			}
+			// Sleep for the scaledown cooldown period before checking the conditions again
+			time.Sleep(time.Duration(scaledowncooldownPeriodSeconds) * time.Second)
 		} else {
 			// No scaling conditions met, so no changes to the MIG
 			log.Printf("No condition %s or %s met, keeping the same number of nodes!", prometheusUpCondition, prometheusDownCondition)
+			// Sleep for the default cooldown period before checking the conditions again
+			time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
 		}
-
-		// Sleep for the cooldown period before checking the conditions again
-		time.Sleep(time.Duration(cooldownPeriodSeconds) * time.Second)
 	}
 }
