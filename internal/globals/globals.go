@@ -18,8 +18,17 @@ func GetEnv(key string, defaultVal string) string {
 }
 
 // IsInCriticalPeriod checks if the current time is within the critical period
-func IsInCriticalPeriod(currentTime time.Time, criticalPeriodHours []string, criticalPeriodDays []string) bool {
+func IsInCriticalPeriod() bool {
+	currentTime := time.Now().UTC()
 	currentWeekday := int(currentTime.Weekday())
+	// Critical period variables to scale up the MIG to the minimum size
+	criticalPeriodHours := strings.Split(GetEnv("CRITICAL_PERIOD_HOURS_UTC", ""), "-")
+	if criticalPeriodHours[0] != "" && len(criticalPeriodHours) != 2 {
+		log.Fatalf("You must set CRITICAL_PERIOD_HOURS_UTC environment variable with the start and end hours of the critical period in UTC separated by a dash 4:00:00-6:00:00")
+		os.Exit(1)
+	}
+	criticalPeriodDays := strings.Split(GetEnv("CRITICAL_PERIOD_DAYS", ""), ",")
+
 	for _, criticalPeriodDay := range criticalPeriodDays {
 		if strings.TrimSpace(criticalPeriodDay) == strconv.Itoa(currentWeekday) {
 			startHour, err := time.Parse("15:04:05", criticalPeriodHours[0])
