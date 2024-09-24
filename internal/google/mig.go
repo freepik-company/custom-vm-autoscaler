@@ -149,8 +149,12 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 
 // getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG).
 func getMIGScalingLimits() (int32, int32, error) {
+
 	// Get min and max size from environment variables and parse to integers
 	minSize, _ := strconv.ParseInt(globals.GetEnv("MIN_SIZE", "1"), 10, 32)
+	if globals.IsInCriticalPeriod() {
+		minSize, _ = strconv.ParseInt(globals.GetEnv("MIN_NODES_CRITICAL_PERIOD", "1"), 10, 32)
+	}
 	maxSize, _ := strconv.ParseInt(globals.GetEnv("MAX_SIZE", "1"), 10, 32)
 
 	return int32(minSize), int32(maxSize), nil
@@ -233,26 +237,26 @@ func getMIGInstanceNames(ctx context.Context, client *compute.InstanceGroupManag
 }
 
 // CheckMIGMinimumSize ensures that the MIG has at least the minimum number of instances running.
-func CheckMIGMinimumSize(projectID, zone, migName string, debugMode bool) error {
+func CheckMIGMinimumSize(projectID, zone, migName string, debugMode bool) (int32, error) {
 	ctx := context.Background()
 
 	// Create a Compute client for managing the MIG
 	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+		return 0, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
 	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
 	if err != nil {
-		return fmt.Errorf("failed to get MIG target size: %v", err)
+		return 0, fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 
 	// Get the scaling limits (minimum and maximum)
 	minSize, _, err := getMIGScalingLimits()
 	if err != nil {
-		return fmt.Errorf("failed to get MIG scaling limits: %v", err)
+		return 0, fmt.Errorf("failed to get MIG scaling limits: %v", err)
 	}
 
 	// If the MIG size is below the minimum, scale it up to the minimum size
@@ -269,11 +273,12 @@ func CheckMIGMinimumSize(projectID, zone, migName string, debugMode bool) error 
 		if !debugMode {
 			_, err = client.Resize(ctx, req)
 			if err != nil {
-				return err
-			} else {
-				log.Printf("Scaled up MIG to its minimum size %d/%d", minSize, minSize)
+				return 0, err
 			}
 		}
+		return minSize, nil
+	} else {
+		return 0, fmt.Errorf("MIG size is already at the minimum limit (%d/%d)", targetSize, minSize)
 	}
-	return nil
+
 }

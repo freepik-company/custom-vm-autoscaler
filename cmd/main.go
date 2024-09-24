@@ -57,10 +57,19 @@ func main() {
 
 	// Main loop to monitor scaling conditions and manage the MIG
 	for {
+
 		// Check if the MIG is at its minimum size at least. If not, scale it up to minSize
-		err := google.CheckMIGMinimumSize(projectID, zone, migName, debugMode)
+		minSize, err := google.CheckMIGMinimumSize(projectID, zone, migName, debugMode)
 		if err != nil {
 			log.Printf("Error checking minimum size for MIG nodes: %v", err)
+		} else {
+			log.Printf("MIG %s scaled up to its minimum size %d", migName, minSize)
+			if slackWebhookURL != "" {
+				message := fmt.Sprintf("MIG %s scaled up to its minimum size %d", migName, minSize)
+				slack.NotifySlack(message, slackWebhookURL)
+			}
+			time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
+			continue
 		}
 
 		// Fetch the scale up and down conditions from Prometheus
