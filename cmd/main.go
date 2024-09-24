@@ -46,6 +46,13 @@ func main() {
 	defaultcooldownPeriodSeconds, _ := strconv.ParseInt(globals.GetEnv("DEFAULT_COOLDOWN_PERIOD_SEC", "60"), 10, 64)
 	retryIntervalSeconds, _ := strconv.ParseInt(globals.GetEnv("RETRY_INTERVAL_SEC", "60"), 10, 64)
 
+	// Critical period variables to scale up the MIG to the minimum size
+	criticalPeriodHours := strings.Split(globals.GetEnv("CRITICAL_PERIOD_HOURS_UTC", ""), "-")
+	if criticalPeriodHours[0] != "" && len(criticalPeriodHours) != 2 {
+		log.Fatalf("You must set CRITICAL_PERIOD_HOURS_UTC environment variable with the start and end hours of the critical period in UTC separated by a dash 4:00:00-6:00:00")
+	}
+	criticalPeriodDays := strings.Split(globals.GetEnv("CRITICAL_PERIOD_DAYS", ""), ",")
+
 	// Debug mode flag, enabled if "DEBUG_MODE" is set to "true"
 	debugModeStr := globals.GetEnv("DEBUG_MODE", "false")
 	var debugMode bool
@@ -55,12 +62,27 @@ func main() {
 		debugMode = false
 	}
 
+	// Check if the MIG is at its minimum size at least. If not, scale it up to minSize
+	err := google.CheckMIGMinimumSize(projectID, zone, migName, debugMode)
+	if err != nil {
+		log.Printf("Error checking minimum size for MIG nodes: %v", err)
+	}
+
 	// Main loop to monitor scaling conditions and manage the MIG
 	for {
-		// Check if the MIG is at its minimum size at least. If not, scale it up to minSize
-		err := google.CheckMIGMinimumSize(projectID, zone, migName, debugMode)
-		if err != nil {
-			log.Printf("Error checking minimum size for MIG nodes: %v", err)
+
+		// Check if we are in the critical period hours and in the critical period days to scale up the
+		// MIG to the minimum critical period size
+		currentTime := time.Now().UTC()
+		if globals.IsInCriticalPeriod(currentTime, criticalPeriodHours, criticalPeriodDays) {
+			log.Printf("In critical period hours %d:%d:%d -> %s and critical period days %d -> %s. Trying to scale up to the minimum critical period size!", currentTime.Hour(), currentTime.Minute(), currentTime.Second(), criticalPeriodHours, currentTime.Weekday(), criticalPeriodDays)
+			err := google.ScaleMIGToCriticalMinimumSize(projectID, zone, migName, debugMode)
+			if err != nil {
+				log.Printf("Error trying to scale MIG in critical period: %v", err)
+			} else {
+				time.Sleep(time.Duration(cooldownPeriodSeconds) * time.Second)
+				continue
+			}
 		}
 
 		// Fetch the scale up and down conditions from Prometheus
@@ -96,6 +118,11 @@ func main() {
 			time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
 		} else if downCondition { // If the down condition is met, remove a node from the MIG
 			log.Printf("Down condition %s met. Trying to remove one node!", prometheusDownCondition)
+			if globals.IsInCriticalPeriod(currentTime, criticalPeriodHours, criticalPeriodDays) {
+				log.Printf("In critical period hours %d:%d:%d -> %s and critical period days %d -> %s. Skipping node removal!", currentTime.Hour(), currentTime.Minute(), currentTime.Second(), criticalPeriodHours, currentTime.Weekday(), criticalPeriodDays)
+				time.Sleep(time.Duration(cooldownPeriodSeconds) * time.Second)
+				continue
+			}
 			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)

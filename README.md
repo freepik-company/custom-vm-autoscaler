@@ -39,6 +39,9 @@ This project is designed to automate the scaling of Google Cloud Managed Instanc
    * DEBUG_MODE: Does not execute scalations, just log and send slack messages (Default `false`)
    * MIN_SIZE: Minimum size for the nodegroup (Default `1`)
    * MAX_SIZE: Maximum size for the nodegroup (Default `1`)
+   * CRITICAL_PERIOD_HOURS_UTC: Critical hours where MIG needs at least a minimum nodes to work properly (`Optional`) (Example: "6:00:00-8:00:00")
+   * CRITICAL_PERIOD_DAYS: Critical days where MIG needs at least a minimum nodes to work properly (`Optional`) (Example: "2,3,4")
+   * MIN_NODES_CRITICAL_PERIOD: Minimum nodes for critical period to exist (`Optional`)
 
 2.	**Dependencies**:
 	•	Go modules: Ensure you have Go installed and run go mod tidy to install dependencies.
@@ -67,6 +70,7 @@ Contains functions for Google Cloud operations:
 * AddNodeToMIG: Increases the size of the MIG by 1 if it has not reached the maximum size.
 * RemoveNodeFromMIG: Decreases the size of the MIG by 1 after draining an Elasticsearch node.
 * CheckMIGMinimumSize: Ensures the MIG size is not below the minimum size.
+* ScaleMIGToCriticalMinimumSize: Scale the MIG size to the minimum size set by env var in critical periods.
 
 ### prometheus
 
@@ -97,6 +101,7 @@ Contains functions for managing Elasticsearch nodes:
 Contains global functions
 
 * GetEnv: Return environment variable value if set. If not, it returns the default value set as second argument
+* IsInCriticalPeriod: Return true when we are in the critical period set by env vars CRITICAL_PERIOD_DAYS and CRITICAL_PERIOD_HOURS_UTC
 
 ## License
 

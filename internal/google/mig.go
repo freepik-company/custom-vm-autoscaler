@@ -277,3 +277,57 @@ func CheckMIGMinimumSize(projectID, zone, migName string, debugMode bool) error 
 	}
 	return nil
 }
+
+// ScaleMIGToCriticalMinimumSize ensures that the MIG has at least the minimum number of instances running in critical
+// periods.
+func ScaleMIGToCriticalMinimumSize(projectID, zone, migName string, debugMode bool) error {
+	ctx := context.Background()
+
+	// Create a Compute client for managing the MIG
+	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
+	if err != nil {
+		return fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+	}
+	defer client.Close()
+
+	// Get the current target size of the MIG
+	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
+	if err != nil {
+		return fmt.Errorf("failed to get MIG target size: %v", err)
+	}
+
+	// Get the scaling limits (minimum and maximum)
+	minSize, maxSize, err := getMIGScalingLimits()
+	if err != nil {
+		return fmt.Errorf("failed to get MIG scaling limits: %v", err)
+	}
+
+	minNodesCriticalPeriod, _ := strconv.ParseInt(globals.GetEnv("MIN_NODES_CRITICAL_PERIOD", "0"), 10, 32)
+	if minNodesCriticalPeriod == 0 {
+		return fmt.Errorf("MIN_NODES_CRITICAL_PERIOD is not set")
+	}
+
+	// If the MIG size is below the minimum, scale it up to the minimum size
+	if int32(minNodesCriticalPeriod) > minSize && int32(minNodesCriticalPeriod) <= maxSize && targetSize <= int32(minNodesCriticalPeriod) {
+		log.Printf("MIG size is below the limit (%d/%d) in the critical period, scaling it up...", targetSize, int32(minNodesCriticalPeriod))
+		req := &computepb.ResizeInstanceGroupManagerRequest{
+			Project:              projectID,
+			Zone:                 zone,
+			InstanceGroupManager: migName,
+			Size:                 int32(minNodesCriticalPeriod),
+		}
+
+		// Resize the MIG if not in debug mode
+		if !debugMode {
+			_, err = client.Resize(ctx, req)
+			if err != nil {
+				return err
+			} else {
+				log.Printf("Scaled up MIG to its minimum size in critical period %d/%d", int32(minNodesCriticalPeriod), int32(minNodesCriticalPeriod))
+			}
+		}
+	} else {
+		return fmt.Errorf("MIG size is already at the minimum limit in critical period (%d/%d)", targetSize, int32(minNodesCriticalPeriod))
+	}
+	return nil
+}
