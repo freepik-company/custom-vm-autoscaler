@@ -76,11 +76,16 @@ func main() {
 		currentTime := time.Now().UTC()
 		if globals.IsInCriticalPeriod(currentTime, criticalPeriodHours, criticalPeriodDays) {
 			log.Printf("In critical period hours %d:%d:%d -> %s and critical period days %d -> %s. Trying to scale up to the minimum critical period size!", currentTime.Hour(), currentTime.Minute(), currentTime.Second(), criticalPeriodHours, currentTime.Weekday(), criticalPeriodDays)
-			err := google.ScaleMIGToCriticalMinimumSize(projectID, zone, migName, debugMode)
+			currentSize, err := google.ScaleMIGToCriticalMinimumSize(projectID, zone, migName, debugMode)
 			if err != nil {
 				log.Printf("Error trying to scale MIG in critical period: %v", err)
 			} else {
-				time.Sleep(time.Duration(cooldownPeriodSeconds) * time.Second)
+				// Notify via Slack
+				if slackWebhookURL != "" {
+					message := fmt.Sprintf("Scaled MIG %s to the minimum critical size nodes. Current size is %d nodes.", migName, currentSize)
+					slack.NotifySlack(message, slackWebhookURL)
+				}
+				time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
 				continue
 			}
 		}
@@ -120,7 +125,7 @@ func main() {
 			log.Printf("Down condition %s met. Trying to remove one node!", prometheusDownCondition)
 			if globals.IsInCriticalPeriod(currentTime, criticalPeriodHours, criticalPeriodDays) {
 				log.Printf("In critical period hours %d:%d:%d -> %s and critical period days %d -> %s. Skipping node removal!", currentTime.Hour(), currentTime.Minute(), currentTime.Second(), criticalPeriodHours, currentTime.Weekday(), criticalPeriodDays)
-				time.Sleep(time.Duration(cooldownPeriodSeconds) * time.Second)
+				time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
 				continue
 			}
 			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword, debugMode)
