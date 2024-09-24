@@ -70,7 +70,6 @@ Contains functions for Google Cloud operations:
 * AddNodeToMIG: Increases the size of the MIG by 1 if it has not reached the maximum size.
 * RemoveNodeFromMIG: Decreases the size of the MIG by 1 after draining an Elasticsearch node.
 * CheckMIGMinimumSize: Ensures the MIG size is not below the minimum size.
-* ScaleMIGToCriticalMinimumSize: Scale the MIG size to the minimum size set by env var in critical periods.
 
 ### prometheus
 
