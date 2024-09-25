@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/dfradehubs/elasticsearch-vm-autoscaler:latest
+IMG ?= ghcr.io/freepik-company/elasticsearch-vm-autoscaler:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
