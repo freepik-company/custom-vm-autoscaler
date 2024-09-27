@@ -54,7 +54,7 @@ func DrainElasticsearchNode(elasticURL, nodeName, username, password string) err
 	var tr http.RoundTripper
 	if insecureSkipVerify == "true" {
 		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13},
 		}
 	} else {
 		tr = http.DefaultTransport
@@ -225,7 +225,7 @@ func ClearElasticsearchClusterSettings(elasticURL, username, password string) er
 	var tr http.RoundTripper
 	if insecureSkipVerify == "true" {
 		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13},
 		}
 	} else {
 		tr = http.DefaultTransport

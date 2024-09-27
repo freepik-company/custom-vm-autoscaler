@@ -2,9 +2,10 @@ package google
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -201,7 +202,13 @@ func GetInstanceToRemove(ctx context.Context, client *compute.InstanceGroupManag
 	}
 
 	// Randomly select an instance to remove
-	return getInstanceNameFromURL(instanceNames[rand.Intn(len(instanceNames))]), nil
+	randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(instanceNames))))
+	if err != nil {
+		return "", fmt.Errorf("error selecting random instance: %v", err)
+	}
+	randomInstance := int(randomIndex.Int64())
+
+	return getInstanceNameFromURL(instanceNames[randomInstance]), nil
 }
 
 // getMIGInstanceNames retrieves the list of instance names in a Managed Instance Group (MIG).

@@ -4,6 +4,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
+    read_only: true
     ports:
       - "9090:9090"
 

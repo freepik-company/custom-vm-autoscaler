@@ -66,7 +66,10 @@ func main() {
 			log.Printf("MIG %s scaled up to its minimum size %d", migName, minSize)
 			if slackWebhookURL != "" {
 				message := fmt.Sprintf("MIG %s scaled up to its minimum size %d", migName, minSize)
-				slack.NotifySlack(message, slackWebhookURL)
+				err = slack.NotifySlack(message, slackWebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
 			}
 			time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
 			continue
@@ -99,7 +102,10 @@ func main() {
 			// Notify via Slack that a node has been added
 			if slackWebhookURL != "" {
 				message := fmt.Sprintf("Added new node to MIG %s. Current size is %d nodes and the maximum nodes to create are %d", migName, currentSize, maxSize)
-				slack.NotifySlack(message, slackWebhookURL)
+				err = slack.NotifySlack(message, slackWebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
 			}
 			// Sleep for the default cooldown period before checking the conditions again
 			time.Sleep(time.Duration(defaultcooldownPeriodSeconds) * time.Second)
@@ -114,7 +120,10 @@ func main() {
 			// Notify via Slack that a node has been removed
 			if slackWebhookURL != "" {
 				message := fmt.Sprintf("Removed node %s from MIG %s. Current size is %d nodes and the minimum nodes to exist are %d", nodeRemoved, migName, currentSize, minSize)
-				slack.NotifySlack(message, slackWebhookURL)
+				err = slack.NotifySlack(message, slackWebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
 			}
 			// Sleep for the scaledown cooldown period before checking the conditions again
 			time.Sleep(time.Duration(scaledowncooldownPeriodSeconds) * time.Second)
