@@ -47,6 +47,6 @@ type ConfigSpec struct {
 			HoursUTC string `yaml:"hoursUTC,omitempty"`
 			MinSize  int    `yaml:"minSize"`
 			MaxSize  int    `yaml:"maxSize"`
-		} `yaml:"advanzedCustomScalingConfiguration,omitempty"`
+		} `yaml:"advancedCustomScalingConfiguration,omitempty"`
 	} `yaml:"autoscaler"`
 }
