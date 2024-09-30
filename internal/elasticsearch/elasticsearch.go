@@ -3,7 +3,7 @@ package elasticsearch
 import (
 	"bytes"
 	"crypto/tls"
-	"elasticsearch-vm-autoscaler/internal/globals"
+	"custom-vm-autoscaler/api/v1alpha1"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,57 +14,25 @@ import (
 	"github.com/elastic/go-elasticsearch/v8"
 )
 
-// nodeInfo struct for elasticsearch nodes
-type NodeInfo struct {
-	IP          string `json:"ip"`
-	HeapPercent string `json:"heap.percent"`
-	RAMPercent  string `json:"ram.percent"`
-	CPU         string `json:"cpu"`
-	Load1m      string `json:"load_1m"`
-	Load5m      string `json:"load_5m"`
-	Load15m     string `json:"load_15m"`
-	NodeRole    string `json:"node.role"`
-	Master      string `json:"master"`
-	Name        string `json:"name"`
-}
-
-// shardInfo struct for elasticsearch shards
-type ShardInfo struct {
-	Index   string `json:"index"`
-	Shard   string `json:"shard"`
-	PriRep  string `json:"prirep"`
-	State   string `json:"state"`
-	Docs    string `json:"docs"`
-	Store   string `json:"store"`
-	Dataset string `json:"dataset"`
-	IP      string `json:"ip"`
-	Node    string `json:"node"`
-}
-
 // DrainElasticsearchNode drains an Elasticsearch node and performs a controlled shutdown.
 // elasticURL: The URL of the Elasticsearch cluster.
 // nodeName: The name of the node to shut down.
 // username: The username for basic authentication.
 // password: The password for basic authentication.
-func DrainElasticsearchNode(elasticURL, nodeName, username, password string) error {
+func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
 
-	// Check ELASTIC_SSL_INSECURE_SKIP_VERIFY environment variable to skip SSL certificate validation
-	// for elasticsearch
-	insecureSkipVerify := globals.GetEnv("ELASTIC_SSL_INSECURE_SKIP_VERIFY", "false")
-	var tr http.RoundTripper
-	if insecureSkipVerify == "true" {
-		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13},
-		}
-	} else {
-		tr = http.DefaultTransport
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: ctx.Config.Service.Elasticsearch.SSLInsecureSkipVerify,
+			MinVersion:         tls.VersionTLS13,
+		},
 	}
 
 	// Create elasticsearch config for connection
 	cfg := elasticsearch.Config{
-		Addresses: []string{elasticURL},
-		Username:  username,
-		Password:  password,
+		Addresses: []string{ctx.Config.Service.Elasticsearch.URL},
+		Username:  ctx.Config.Service.Elasticsearch.User,
+		Password:  ctx.Config.Service.Elasticsearch.Password,
 		Transport: tr,
 	}
 
@@ -115,7 +83,7 @@ func getNodeIP(es *elasticsearch.Client, nodeName string) (string, error) {
 	}
 
 	// Parse response in JSON
-	var nodes []NodeInfo
+	var nodes []v1alpha1.NodeInfo
 	err = json.Unmarshal([]byte(string(body)), &nodes)
 	if err != nil {
 		return "", fmt.Errorf("error deserializing JSON: %w", err)
@@ -191,7 +159,7 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 		}
 
 		// Parse response in JSON
-		var shards []ShardInfo
+		var shards []v1alpha1.ShardInfo
 		err = json.Unmarshal([]byte(string(body)), &shards)
 		if err != nil {
 			return fmt.Errorf("error deserializing JSON: %w", err)
@@ -217,25 +185,20 @@ func waitForNodeRemoval(es *elasticsearch.Client, nodeName string) error {
 }
 
 // clearClusterSettings removes the node exclusion from cluster settings.
-func ClearElasticsearchClusterSettings(elasticURL, username, password string) error {
+func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context) error {
 
-	// Check ELASTIC_SSL_INSECURE_SKIP_VERIFY environment variable to skip SSL certificate validation
-	// for elasticsearch
-	insecureSkipVerify := globals.GetEnv("ELASTIC_SSL_INSECURE_SKIP_VERIFY", "false")
-	var tr http.RoundTripper
-	if insecureSkipVerify == "true" {
-		tr = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13},
-		}
-	} else {
-		tr = http.DefaultTransport
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: ctx.Config.Service.Elasticsearch.SSLInsecureSkipVerify,
+			MinVersion:         tls.VersionTLS13,
+		},
 	}
 
 	// Configure elasticsearch connection
 	cfg := elasticsearch.Config{
-		Addresses: []string{elasticURL},
-		Username:  username,
-		Password:  password,
+		Addresses: []string{ctx.Config.Service.Elasticsearch.URL},
+		Username:  ctx.Config.Service.Elasticsearch.User,
+		Password:  ctx.Config.Service.Elasticsearch.Password,
 		Transport: tr,
 	}
 

@@ -2,11 +2,10 @@ package prometheus
 
 import (
 	"context"
+	"custom-vm-autoscaler/api/v1alpha1"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -17,22 +16,14 @@ import (
 // customTransport is an HTTP transport that adds custom headers to requests.
 type customTransport struct {
 	Transport http.RoundTripper
+	Config    *v1alpha1.ConfigSpec
 }
 
 // RoundTrip executes a single HTTP transaction and adds custom headers.
 func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Get all environment vars
-	for _, env := range os.Environ() {
-		// Split in key value
-		pair := strings.SplitN(env, "=", 2)
-		key := pair[0]
-		value := pair[1]
-
-		// If the variable has the prefix PROMETHEUS_HEADER_, add it as a header
-		if strings.HasPrefix(key, "PROMETHEUS_HEADER_") {
-			headerName := strings.ReplaceAll(key[len("PROMETHEUS_HEADER_"):], "_", "-")
-			req.Header.Set(headerName, value)
-		}
+	// Set headers from the config file
+	for headerName, headerValue := range t.Config.Metrics.Prometheus.Headers {
+		req.Header.Set(headerName, headerValue)
 	}
 
 	return t.Transport.RoundTrip(req)
@@ -41,17 +32,19 @@ func (t *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // GetPrometheusCondition executes a Prometheus query and checks if the condition is true.
 // prometheusURL: The URL of the Prometheus server.
 // prometheusCondition: The Prometheus query condition to be evaluated.
-func GetPrometheusCondition(prometheusURL, prometheusCondition string) (bool, error) {
+func GetPrometheusCondition(prometheusCondition string, ctx *v1alpha1.Context) (bool, error) {
 
 	// Create a custom HTTP client with the custom transport
 	httpClient := &http.Client{
-		Timeout:   10 * time.Second,
-		Transport: &customTransport{Transport: http.DefaultTransport},
+		Timeout: 10 * time.Second,
+		Transport: &customTransport{
+			Transport: http.DefaultTransport,
+			Config:    ctx.Config},
 	}
 
 	// Create a Prometheus API client
 	client, err := api.NewClient(api.Config{
-		Address: prometheusURL, // Set the Prometheus server address
+		Address: ctx.Config.Metrics.Prometheus.URL, // Set the Prometheus server address
 		Client:  httpClient,
 	})
 	if err != nil {
@@ -63,11 +56,11 @@ func GetPrometheusCondition(prometheusURL, prometheusCondition string) (bool, er
 	v1api := v1.NewAPI(client)
 
 	// Set a timeout context for the query
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctxConn, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // Ensure that the context is canceled after query execution
 
 	// Execute the Prometheus query
-	result, warnings, err := v1api.Query(ctx, prometheusCondition, time.Now())
+	result, warnings, err := v1api.Query(ctxConn, prometheusCondition, time.Now())
 	if err != nil {
 		// Return an error if the query fails
 		return false, fmt.Errorf("failed to query Prometheus: %w", err)

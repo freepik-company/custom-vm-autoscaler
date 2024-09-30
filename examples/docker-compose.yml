@@ -17,32 +17,14 @@ services:
       - ELASTIC_USER=elastic
       - ELASTIC_PASSWORD=test
     
-  elasticsearch-vm-autoscaler:
+  custom-vm-autoscaler:
     build:
       context: ../
       dockerfile: Dockerfile
-    container_name: elasticsearch-vm-autoscaler
+    container_name: custom-vm-autoscaler
+    command: ["./custom-vm-autoscaler", "run", "--config", "/tmp/autoscaler.yaml"]
     volumes:
-      - "./credentials.json:/tmp/credentials.json"
+      - "./../config/samples/autoscaler.yaml:/tmp/autoscaler.yaml"
     depends_on:
       - prometheus
       - elasticsearch
-    environment:
-      - PROMETHEUS_URL=http://prometheus:9090
-      - PROMETHEUS_UP_CONDITION=avg_over_time(up{job="prometheus"}[5m]) > 0.8
-      - PROMETHEUS_DOWN_CONDITION=avg_over_time(up{job="prometheus"}[5m]) < 0.6
-      - DEBUG_MODE=true
-      - GCP_PROJECT_ID=test
-      - ZONE=europe-west1-d
-      - MIG_NAME=test
-      - SLACK_WEBHOOK_URL="test"
-      - ELASTIC_URL=https://elasticsearch:9200
-      - ELASTIC_USER=elastic
-      - ELASTIC_PASSWORD=test
-      - DEFAULT_COOLDOWN_PERIOD_SEC=60
-      - SCALEDOWN_COOLDOWN_PERIOD_SEC=60
-      - RETRY_INTERVAL_SEC=30
-      - GOOGLE_APPLICATION_CREDENTIALS=/tmp/credentials.json
-      - MIN_SIZE=1
-      - MAX_SIZE=2
-      - PROMETHEUS_HEADER_X_Scope_OrgID=test

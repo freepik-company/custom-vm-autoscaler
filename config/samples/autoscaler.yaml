@@ -1,0 +1,56 @@
+---
+# Metrics service to check conditions for scaling up or down the cluster
+metrics:
+
+  # Prometheus integration
+  prometheus:
+    url: "http://127.0.0.1:8080"
+    upCondition: "placeholder"
+    downCondition: "placeholder"
+    headers: {}
+
+# Infrastructure service to interact with the cloud provider (GCP, AWS, etc.)
+infrastructure:
+
+  # GCP integration
+  gcp:
+    projectId: "placeholder"
+    zone: "placeholder"
+    migName: "placeholder"
+    credentials_file: "placeholder"
+
+# Target to control when scaling down the cluster
+target:
+
+  # Elasticsearch target service
+  elasticsearch:
+    url: "https://localhost:9200"
+    user: "${ELASTICSEARCH_USER}"
+    password: "${ELASTICSEARCH_PASSWORD}"
+    sslInsecureSkipVerify: true
+
+# Notifications service to send alerts to the team
+notifications:
+
+  # Slack integration
+  slack:
+    webhookUrl: "placeholder"
+
+# General configuration for the autoscaler
+autoscaler:
+  debugMode: true
+  defaultCooldownPeriodSec: 10
+  scaledownCooldownPeriodSec: 10
+  retiryIntervalSec: 10
+  minSize: 1
+  maxSize: 2
+
+  # For advanced custom scaling configuration, when you want a different minSize and maxSize nodes for specific moments
+  advancedCustomScalingConfiguration:
+    - days: "2,3,4"
+      hoursUTC: "5:00:00-8:00:00"
+      minSize: 1
+      maxSize: 2
+    - days: "6,7"
+      minSize: 3
+      maxSize: 4
