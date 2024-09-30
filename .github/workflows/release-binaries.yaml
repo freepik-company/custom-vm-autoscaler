@@ -70,7 +70,7 @@ jobs:
         run: |
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          export PACKAGE_NAME=elasticsearch-vm-autoscaler-${{ steps.read_tag.outputs.release_tag }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+          export PACKAGE_NAME=custom-vm-autoscaler-${{ steps.read_tag.outputs.release_tag }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
           
           make package
           make package-signature

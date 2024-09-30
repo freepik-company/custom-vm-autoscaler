@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"elasticsearch-vm-autoscaler/internal/elasticsearch"
-	"elasticsearch-vm-autoscaler/internal/globals"
+	"custom-vm-autoscaler/api/v1alpha1"
+	"custom-vm-autoscaler/internal/elasticsearch"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -19,28 +19,25 @@ import (
 )
 
 // AddNodeToMIG increases the size of the Managed Instance Group (MIG) by 1, if it has not reached the maximum limit.
-func AddNodeToMIG(projectID, zone, migName string, debugMode bool) (int32, int32, error) {
-	ctx := context.Background()
+func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
+	ctxConn := context.Background()
 
 	// Create a new Compute client for managing the MIG
-	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
+	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
-	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
+	targetSize, err := getMIGTargetSize(ctxConn, client, ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
-	_, maxSize, err := getMIGScalingLimits()
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get MIG scaling limits: %v", err)
-	}
+	_, maxSize := getMIGScalingLimits(ctx)
 
 	// Check if the MIG has reached its maximum size
 	if targetSize >= maxSize {
@@ -49,15 +46,15 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) (int32, int32
 
 	// Create a request to resize the MIG by increasing the target size by 1
 	req := &computepb.ResizeInstanceGroupManagerRequest{
-		Project:              projectID,
-		Zone:                 zone,
-		InstanceGroupManager: migName,
+		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
+		Zone:                 ctx.Config.Infrastructure.GCP.Zone,
+		InstanceGroupManager: ctx.Config.Infrastructure.GCP.MIGName,
 		Size:                 targetSize + 1,
 	}
 
 	// Resize the MIG if not in debug mode
-	if !debugMode {
-		_, err = client.Resize(ctx, req)
+	if !ctx.Config.Autoscaler.DebugMode {
+		_, err = client.Resize(ctxConn, req)
 		if err != nil {
 			return 0, 0, err
 		} else {
@@ -68,28 +65,25 @@ func AddNodeToMIG(projectID, zone, migName string, debugMode bool) (int32, int32
 }
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
-func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasticPassword string, debugMode bool) (int32, int32, string, error) {
-	ctx := context.Background()
+func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
+	ctxConn := context.Background()
 
 	// Create a new Compute client for managing the MIG
-	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
+	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
-	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
+	targetSize, err := getMIGTargetSize(ctxConn, client, ctx)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
-	minSize, _, err := getMIGScalingLimits()
-	if err != nil {
-		return 0, 0, "", fmt.Errorf("failed to get MIG scaling limits: %v", err)
-	}
+	minSize, _ := getMIGScalingLimits(ctx)
 
 	// Check if the MIG has reached its minimum size
 	if targetSize <= minSize {
@@ -97,15 +91,15 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	}
 
 	// Get a random instance from the MIG to remove
-	instanceToRemove, err := GetInstanceToRemove(ctx, client, projectID, zone, migName)
+	instanceToRemove, err := GetInstanceToRemove(ctxConn, client, ctx)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("error draining Elasticsearch node: %v", err)
 	}
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
-	if !debugMode {
+	if !ctx.Config.Autoscaler.DebugMode {
 		log.Printf("Instance to remove: %s. Draining from elasticsearch cluster", instanceToRemove)
-		err = elasticsearch.DrainElasticsearchNode(elasticURL, instanceToRemove, elasticUser, elasticPassword)
+		err = elasticsearch.DrainElasticsearchNode(ctx, instanceToRemove)
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("error draining Elasticsearch node: %v", err)
 		}
@@ -113,19 +107,19 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 	}
 
 	// Create a request to delete the selected instance and reduce the MIG size
-	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", projectID, zone, instanceToRemove)
+	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", ctx.Config.Infrastructure.GCP.ProjectID, ctx.Config.Infrastructure.GCP.Zone, instanceToRemove)
 	deleteReq := &computepb.DeleteInstancesInstanceGroupManagerRequest{
-		Project:              projectID,
-		Zone:                 zone,
-		InstanceGroupManager: migName,
+		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
+		Zone:                 ctx.Config.Infrastructure.GCP.Zone,
+		InstanceGroupManager: ctx.Config.Infrastructure.GCP.MIGName,
 		InstanceGroupManagersDeleteInstancesRequestResource: &computepb.InstanceGroupManagersDeleteInstancesRequest{
 			Instances: []string{instanceURL},
 		},
 	}
 
 	// Delete the instance if not in debug mode
-	if !debugMode {
-		_, err = client.DeleteInstances(ctx, deleteReq)
+	if !ctx.Config.Autoscaler.DebugMode {
+		_, err = client.DeleteInstances(ctxConn, deleteReq)
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("error deleting instance: %v", err)
 		} else {
@@ -134,11 +128,9 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 		// Wait 90 seconds until instance is fully deleted
 		// Google Cloud has a deletion timeout of 90 seconds max
 		time.Sleep(90 * time.Second)
-	}
 
-	// If not in debug mode, remove the elasticsearch node from cluster settings
-	if !debugMode {
-		err = elasticsearch.ClearElasticsearchClusterSettings(elasticURL, elasticUser, elasticPassword)
+		// Remove the elasticsearch node from cluster settings
+		err = elasticsearch.ClearElasticsearchClusterSettings(ctx)
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
 		}
@@ -149,29 +141,63 @@ func RemoveNodeFromMIG(projectID, zone, migName, elasticURL, elasticUser, elasti
 }
 
 // getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG).
-func getMIGScalingLimits() (int32, int32, error) {
+func getMIGScalingLimits(ctx *v1alpha1.Context) (int32, int32) {
+	currentTime := time.Now().UTC()
+	currentWeekday := int(currentTime.Weekday())
 
-	// Get min and max size from environment variables and parse to integers
-	minSize, _ := strconv.ParseInt(globals.GetEnv("MIN_SIZE", "1"), 10, 32)
-	if globals.IsInCriticalPeriod() {
-		minSize, _ = strconv.ParseInt(globals.GetEnv("MIN_NODES_CRITICAL_PERIOD", "1"), 10, 32)
+	for _, scalingConfig := range ctx.Config.Autoscaler.AdvancedCustomScalingConfiguration {
+		// Check if current day is within the critical period days
+		criticalPeriodDays := strings.Split(scalingConfig.Days, ",")
+		for _, criticalPeriodDay := range criticalPeriodDays {
+			if strings.TrimSpace(criticalPeriodDay) == strconv.Itoa(currentWeekday) {
+				if scalingConfig.HoursUTC != "" {
+					criticalPeriodHours := strings.Split(scalingConfig.HoursUTC, "-")
+					if len(criticalPeriodHours) != 2 {
+						log.Fatalf("Invalid hours format in advanced_scaling_configuration. Expected start and end hours separated by a dash (e.g., 4:00:00-6:00:00)")
+						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+					}
+					// Parse start and end hours
+					startHour, err := time.Parse("15:04:05", criticalPeriodHours[0])
+					if err != nil {
+						log.Printf("Error parsing start hour: %v", err)
+						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+					}
+					endHour, err := time.Parse("15:04:05", criticalPeriodHours[1])
+					if err != nil {
+						log.Printf("Error parsing end hour: %v", err)
+						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+					}
+
+					// Adjust start and end times to match the current date
+					startTime := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), startHour.Hour(), startHour.Minute(), startHour.Second(), 0, currentTime.Location())
+					endTime := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), endHour.Hour(), endHour.Minute(), endHour.Second(), 0, currentTime.Location())
+
+					// Check if current time is within the critical period
+					if currentTime.After(startTime) && currentTime.Before(endTime) {
+						return int32(scalingConfig.MinSize), int32(scalingConfig.MaxSize)
+					}
+				} else {
+					// If no hours are provided, assume critical period is for the entire day
+					return int32(scalingConfig.MinSize), int32(scalingConfig.MaxSize)
+				}
+			}
+		}
 	}
-	maxSize, _ := strconv.ParseInt(globals.GetEnv("MAX_SIZE", "1"), 10, 32)
 
-	return int32(minSize), int32(maxSize), nil
+	return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
 }
 
 // getMIGTargetSize retrieves the current target size of a Managed Instance Group (MIG).
-func getMIGTargetSize(ctx context.Context, client *compute.InstanceGroupManagersClient, projectID, zone, migName string) (int32, error) {
+func getMIGTargetSize(ctxConn context.Context, client *compute.InstanceGroupManagersClient, ctx *v1alpha1.Context) (int32, error) {
 	// Create a request to get the MIG details
 	req := &computepb.GetInstanceGroupManagerRequest{
-		Project:              projectID,
-		Zone:                 zone,
-		InstanceGroupManager: migName,
+		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
+		Zone:                 ctx.Config.Infrastructure.GCP.Zone,
+		InstanceGroupManager: ctx.Config.Infrastructure.GCP.MIGName,
 	}
 
 	// Get the MIG details from Google Cloud
-	mig, err := client.Get(ctx, req)
+	mig, err := client.Get(ctxConn, req)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get MIG: %v", err)
 	}
@@ -191,9 +217,9 @@ func getInstanceNameFromURL(instanceURL string) string {
 }
 
 // GetInstanceToRemove retrieves a random instance from the MIG to be removed.
-func GetInstanceToRemove(ctx context.Context, client *compute.InstanceGroupManagersClient, projectID, zone, migName string) (string, error) {
+func GetInstanceToRemove(ctxConn context.Context, client *compute.InstanceGroupManagersClient, ctx *v1alpha1.Context) (string, error) {
 	// Get the list of instances in the MIG
-	instanceNames, err := getMIGInstanceNames(ctx, client, projectID, zone, migName)
+	instanceNames, err := getMIGInstanceNames(ctxConn, client, ctx)
 	if err != nil {
 		return "", err
 	}
@@ -212,16 +238,16 @@ func GetInstanceToRemove(ctx context.Context, client *compute.InstanceGroupManag
 }
 
 // getMIGInstanceNames retrieves the list of instance names in a Managed Instance Group (MIG).
-func getMIGInstanceNames(ctx context.Context, client *compute.InstanceGroupManagersClient, projectID, zone, migName string) ([]string, error) {
+func getMIGInstanceNames(ctxConn context.Context, client *compute.InstanceGroupManagersClient, ctx *v1alpha1.Context) ([]string, error) {
 	// Create a request to list the managed instances in the MIG
 	req := &computepb.ListManagedInstancesInstanceGroupManagersRequest{
-		Project:              projectID,
-		Zone:                 zone,
-		InstanceGroupManager: migName,
+		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
+		Zone:                 ctx.Config.Infrastructure.GCP.Zone,
+		InstanceGroupManager: ctx.Config.Infrastructure.GCP.MIGName,
 	}
 
 	// Call the API and get an iterator for the managed instances
-	it := client.ListManagedInstances(ctx, req)
+	it := client.ListManagedInstances(ctxConn, req)
 
 	// Store the instance names in a slice
 	var instanceNames []string
@@ -244,41 +270,38 @@ func getMIGInstanceNames(ctx context.Context, client *compute.InstanceGroupManag
 }
 
 // CheckMIGMinimumSize ensures that the MIG has at least the minimum number of instances running.
-func CheckMIGMinimumSize(projectID, zone, migName string, debugMode bool) (int32, error) {
-	ctx := context.Background()
+func CheckMIGMinimumSize(ctx *v1alpha1.Context) (int32, error) {
+	ctxConn := context.Background()
 
 	// Create a Compute client for managing the MIG
-	client, err := createComputeClient(ctx, compute.NewInstanceGroupManagersRESTClient)
+	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
-	targetSize, err := getMIGTargetSize(ctx, client, projectID, zone, migName)
+	targetSize, err := getMIGTargetSize(ctxConn, client, ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 
 	// Get the scaling limits (minimum and maximum)
-	minSize, _, err := getMIGScalingLimits()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get MIG scaling limits: %v", err)
-	}
+	minSize, _ := getMIGScalingLimits(ctx)
 
 	// If the MIG size is below the minimum, scale it up to the minimum size
 	if targetSize < minSize {
 		log.Printf("MIG size is below the limit (%d/%d), scaling it up...", targetSize, minSize)
 		req := &computepb.ResizeInstanceGroupManagerRequest{
-			Project:              projectID,
-			Zone:                 zone,
-			InstanceGroupManager: migName,
+			Project:              ctx.Config.Infrastructure.GCP.ProjectID,
+			Zone:                 ctx.Config.Infrastructure.GCP.Zone,
+			InstanceGroupManager: ctx.Config.Infrastructure.GCP.MIGName,
 			Size:                 minSize,
 		}
 
 		// Resize the MIG if not in debug mode
-		if !debugMode {
-			_, err = client.Resize(ctx, req)
+		if !ctx.Config.Autoscaler.DebugMode {
+			_, err = client.Resize(ctxConn, req)
 			if err != nil {
 				return 0, err
 			}

@@ -1,4 +1,4 @@
-module elasticsearch-vm-autoscaler
+module custom-vm-autoscaler
 
 go 1.23.1
 
@@ -8,7 +8,9 @@ require (
 	github.com/prometheus/client_golang v1.20.3
 	github.com/prometheus/common v0.59.1
 	github.com/slack-go/slack v0.14.0
+	github.com/spf13/cobra v1.8.1
 	google.golang.org/api v0.193.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -24,10 +26,13 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.13.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.53.0 // indirect
 	go.opentelemetry.io/otel v1.28.0 // indirect

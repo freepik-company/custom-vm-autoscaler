@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/freepik-company/elasticsearch-vm-autoscaler:latest
+IMG ?= ghcr.io/freepik-company/custom-vm-autoscaler:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -83,7 +83,7 @@ check-go-target: ## Check presente of GOOS and GOARCH vars.
 
 .PHONY: build
 build: fmt vet check-go-target ## Build CLI binary.
-	go build -o bin/elasticsearch-vm-autoscaler-$(GOOS)-$(GOARCH) cmd/main.go
+	go build -o bin/custom-vm-autoscaler-$(GOOS)-$(GOARCH) cmd/main.go
 
 .PHONY: run
 run: fmt vet ## Run a controller from your host.
@@ -125,9 +125,9 @@ package: check-go-target ## Package binary.
 	@mkdir -p dist
 
 	@if [ "$(OS)" = "linux" ]; then \
-		tar --transform="s/elasticsearch-vm-autoscaler-$(GOOS)-$(GOARCH)/elasticsearch-vm-autoscaler/" -cvzf dist/$(PACKAGE_NAME) -C bin elasticsearch-vm-autoscaler-$(GOOS)-$(GOARCH) -C ../ LICENSE README.md; \
+		tar --transform="s/custom-vm-autoscaler-$(GOOS)-$(GOARCH)/custom-vm-autoscaler/" -cvzf dist/$(PACKAGE_NAME) -C bin custom-vm-autoscaler-$(GOOS)-$(GOARCH) -C ../ LICENSE README.md; \
 	elif [ "$(OS)" = "darwin" ]; then \
-		tar -cvzf dist/$(PACKAGE_NAME) -s '/elasticsearch-vm-autoscaler-$(GOOS)-$(GOARCH)/elasticsearch-vm-autoscaler/' -C bin elasticsearch-vm-autoscaler-$(GOOS)-$(GOARCH) -C ../ LICENSE README.md; \
+		tar -cvzf dist/$(PACKAGE_NAME) -s '/custom-vm-autoscaler-$(GOOS)-$(GOARCH)/custom-vm-autoscaler/' -C bin custom-vm-autoscaler-$(GOOS)-$(GOARCH) -C ../ LICENSE README.md; \
 	else \
 		echo "Unsupported OS: $(GOOS)"; \
 		exit 1; \
