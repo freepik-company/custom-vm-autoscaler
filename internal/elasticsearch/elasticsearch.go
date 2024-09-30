@@ -23,16 +23,16 @@ func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: ctx.Config.Service.Elasticsearch.SSLInsecureSkipVerify,
+			InsecureSkipVerify: ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify,
 			MinVersion:         tls.VersionTLS13,
 		},
 	}
 
 	// Create elasticsearch config for connection
 	cfg := elasticsearch.Config{
-		Addresses: []string{ctx.Config.Service.Elasticsearch.URL},
-		Username:  ctx.Config.Service.Elasticsearch.User,
-		Password:  ctx.Config.Service.Elasticsearch.Password,
+		Addresses: []string{ctx.Config.Target.Elasticsearch.URL},
+		Username:  ctx.Config.Target.Elasticsearch.User,
+		Password:  ctx.Config.Target.Elasticsearch.Password,
 		Transport: tr,
 	}
 
@@ -189,16 +189,16 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context) error {
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: ctx.Config.Service.Elasticsearch.SSLInsecureSkipVerify,
+			InsecureSkipVerify: ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify,
 			MinVersion:         tls.VersionTLS13,
 		},
 	}
 
 	// Configure elasticsearch connection
 	cfg := elasticsearch.Config{
-		Addresses: []string{ctx.Config.Service.Elasticsearch.URL},
-		Username:  ctx.Config.Service.Elasticsearch.User,
-		Password:  ctx.Config.Service.Elasticsearch.Password,
+		Addresses: []string{ctx.Config.Target.Elasticsearch.URL},
+		Username:  ctx.Config.Target.Elasticsearch.User,
+		Password:  ctx.Config.Target.Elasticsearch.Password,
 		Transport: tr,
 	}
 

@@ -50,7 +50,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 	}
 
 	// Load default values
-	ctx.Config.Service.Elasticsearch.SSLInsecureSkipVerify = defaultElasticsearchInsecureSkipVerify
+	ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify = defaultElasticsearchInsecureSkipVerify
 	ctx.Config.Autoscaler.DebugMode = defaultDebugMode
 
 	// Get and parse the config

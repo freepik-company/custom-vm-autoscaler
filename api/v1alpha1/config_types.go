@@ -20,14 +20,14 @@ type ConfigSpec struct {
 		} `yaml:"gcp"`
 	} `yaml:"infrastructure"`
 
-	Service struct {
+	Target struct {
 		Elasticsearch struct {
 			URL                   string `yaml:"url"`
 			User                  string `yaml:"user"`
 			Password              string `yaml:"password"`
 			SSLInsecureSkipVerify bool   `yaml:"sslInsecureSkipVerify,omitempty"`
 		} `yaml:"elasticsearch"`
-	} `yaml:"service"`
+	} `yaml:"target"`
 
 	Notifications struct {
 		Slack struct {
