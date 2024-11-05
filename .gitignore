@@ -1,3 +1,4 @@
 examples/credentials.json
 examples/.env
+examples/autoscaler.yaml
 bin/

@@ -22,11 +22,12 @@ type ConfigSpec struct {
 
 	Target struct {
 		Elasticsearch struct {
-			URL                   string `yaml:"url"`
-			User                  string `yaml:"user"`
-			Password              string `yaml:"password"`
+			URL                   string `yaml:"url,omitempty"`
+			User                  string `yaml:"user,omitempty"`
+			Password              string `yaml:"password,omitempty"`
 			SSLInsecureSkipVerify bool   `yaml:"sslInsecureSkipVerify,omitempty"`
-		} `yaml:"elasticsearch"`
+			DrainTimeoutSec       int    `yaml:"drainTimeoutSec,omitempty"`
+		} `yaml:"elasticsearch,omitempty"`
 	} `yaml:"target"`
 
 	Notifications struct {
