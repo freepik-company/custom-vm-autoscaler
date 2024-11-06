@@ -20,20 +20,20 @@ import (
 )
 
 // AddNodeToMIG increases the size of the Managed Instance Group (MIG) by 1, if it has not reached the maximum limit.
-func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
+func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, bool, error) {
 	ctxConn := context.Background()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+		return 0, 0, false, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
 	targetSize, err := getMIGTargetSize(ctxConn, client, ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to get MIG target size: %v", err)
+		return 0, 0, false, fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
@@ -42,7 +42,8 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 
 	// Check if the MIG has reached its maximum size
 	if targetSize >= maxSize {
-		return 0, 0, fmt.Errorf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
+		log.Printf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
+		return 0, 0, true, nil
 	}
 
 	// Create a request to resize the MIG by increasing the target size by 1
@@ -57,29 +58,29 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 	if !ctx.Config.Autoscaler.DebugMode {
 		_, err = client.Resize(ctxConn, req)
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, false, err
 		} else {
 			log.Printf("Scaled up MIG successfully %d/%d", targetSize+1, maxSize)
 		}
 	}
-	return targetSize + 1, maxSize, nil
+	return targetSize + 1, maxSize, true, nil
 }
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
-func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
+func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, bool, error) {
 	ctxConn := context.Background()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return 0, 0, "", fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+		return 0, 0, "", false, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
 	targetSize, err := getMIGTargetSize(ctxConn, client, ctx)
 	if err != nil {
-		return 0, 0, "", fmt.Errorf("failed to get MIG target size: %v", err)
+		return 0, 0, "", false, fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
@@ -88,13 +89,14 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 
 	// Check if the MIG has reached its minimum size
 	if targetSize <= minSize {
-		return 0, 0, "", fmt.Errorf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
+		log.Printf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
+		return 0, 0, "", true, nil
 	}
 
 	// Get a random instance from the MIG to remove
 	instanceToRemove, err := GetInstanceToRemove(ctxConn, client, ctx)
 	if err != nil {
-		return 0, 0, "", fmt.Errorf("error getting instance to remove: %v", err)
+		return 0, 0, "", false, fmt.Errorf("error getting instance to remove: %v", err)
 	}
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
@@ -105,7 +107,7 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 		log.Printf("Instance to remove: %s. Draining from elasticsearch cluster", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(ctx, instanceToRemove)
 		if err != nil {
-			return 0, 0, "", fmt.Errorf("error draining Elasticsearch node: %v", err)
+			return 0, 0, "", false, fmt.Errorf("error draining Elasticsearch node: %v", err)
 		}
 		log.Printf("Instance drained successfully from elasticsearch cluster")
 	}
@@ -125,7 +127,7 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 	if !ctx.Config.Autoscaler.DebugMode {
 		_, err = client.DeleteInstances(ctxConn, deleteReq)
 		if err != nil {
-			return 0, 0, "", fmt.Errorf("error deleting instance: %v", err)
+			return 0, 0, "", false, fmt.Errorf("error deleting instance: %v", err)
 		}
 	}
 
@@ -144,12 +146,12 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 		// Remove the elasticsearch node from cluster settings
 		err = elasticsearch.ClearElasticsearchClusterSettings(ctx, instanceToRemove)
 		if err != nil {
-			return 0, 0, "", fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
+			return 0, 0, "", false, fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
 		}
 		log.Printf("Cleared up elasticsearch settings for draining node")
 	}
 
-	return targetSize - 1, minSize, instanceToRemove, nil
+	return targetSize - 1, minSize, instanceToRemove, true, nil
 }
 
 // getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG).
