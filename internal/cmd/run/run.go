@@ -117,7 +117,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 				continue
 			}
 			// Notify via Slack that a node has been added
-			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+			if ctx.Config.Notifications.Slack.WebhookURL != "" && currentSize != -1 {
 				message := fmt.Sprintf("Added new node to MIG %s. Current size is %d nodes and the maximum nodes to create are %d", ctx.Config.Infrastructure.GCP.MIGName, currentSize, maxSize)
 				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
 				if err != nil {
@@ -161,7 +161,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 				continue
 			}
 			// Notify via Slack that a node has been removed
-			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+			if ctx.Config.Notifications.Slack.WebhookURL != "" && nodeRemoved != "" {
 				message := fmt.Sprintf("Removed node %s from MIG %s. Current size is %d nodes and the minimum nodes to exist are %d", nodeRemoved, ctx.Config.Infrastructure.GCP.MIGName, currentSize, minSize)
 				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
 				if err != nil {

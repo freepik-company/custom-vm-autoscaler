@@ -42,7 +42,8 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 
 	// Check if the MIG has reached its maximum size
 	if targetSize >= maxSize {
-		return 0, 0, fmt.Errorf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
+		log.Printf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
+		return -1, -1, nil
 	}
 
 	// Create a request to resize the MIG by increasing the target size by 1
@@ -88,7 +89,8 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 
 	// Check if the MIG has reached its minimum size
 	if targetSize <= minSize {
-		return 0, 0, "", fmt.Errorf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
+		log.Printf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
+		return -1, -1, "", nil
 	}
 
 	// Get a random instance from the MIG to remove
