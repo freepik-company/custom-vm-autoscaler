@@ -26,3 +26,9 @@ type ShardInfo struct {
 	IP      string `json:"ip"`
 	Node    string `json:"node"`
 }
+
+// settings struct for elasticsearch settings
+type ElasticsearchSettings struct {
+	Persistent map[string]interface{} `json:"persistent"`
+	Transient  map[string]interface{} `json:"transient"`
+}

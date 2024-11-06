@@ -49,10 +49,6 @@ func RunCommand(cmd *cobra.Command, args []string) {
 		Config: &v1alpha1.ConfigSpec{},
 	}
 
-	// Load default values
-	ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify = defaultElasticsearchInsecureSkipVerify
-	ctx.Config.Autoscaler.DebugMode = defaultDebugMode
-
 	// Get and parse the config
 	configContent, err := config.ReadFile(configPath)
 	if err != nil {
@@ -62,37 +58,44 @@ func RunCommand(cmd *cobra.Command, args []string) {
 	// Set the configuration inside the global context
 	ctx.Config = &configContent
 
+	// Load default values
+	if !ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify {
+		ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify = defaultElasticsearchInsecureSkipVerify
+	}
+	if ctx.Config.Target.Elasticsearch.DrainTimeoutSec == 0 {
+		ctx.Config.Target.Elasticsearch.DrainTimeoutSec = defaultElasticsearchDrainTimeoutSec
+	}
+	if !ctx.Config.Autoscaler.DebugMode {
+		ctx.Config.Autoscaler.DebugMode = defaultDebugMode
+	}
+
 	// Main loop to monitor scaling conditions and manage the MIG
 	for {
 
 		// Check if the MIG is at its minimum size at least. If not, scale it up to minSize
-		minSize, err := google.CheckMIGMinimumSize(&ctx)
+		err := google.CheckMIGMinimumSize(&ctx)
 		if err != nil {
-			log.Printf("Error checking minimum size for MIG nodes: %v", err)
-		} else {
-			log.Printf("MIG %s scaled up to its minimum size %d", ctx.Config.Infrastructure.GCP.MIGName, minSize)
+			log.Fatalf("Error checking minimum size for MIG nodes: %v", err)
 			if ctx.Config.Notifications.Slack.WebhookURL != "" {
-				message := fmt.Sprintf("MIG %s scaled up to its minimum size %d", ctx.Config.Infrastructure.GCP.MIGName, minSize)
+				message := fmt.Sprintf("Error checking minimum size for MIG nodes: %v", err)
 				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
 				if err != nil {
 					log.Printf("Error sending Slack notification: %v", err)
 				}
 			}
-			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
-			continue
 		}
 
-		// Fetch the scale up and down conditions from Prometheus
+		// Fetch the scale up condition from Prometheus
 		upCondition, err := prometheus.GetPrometheusCondition(ctx.Config.Metrics.Prometheus.UpCondition, &ctx)
 		if err != nil {
 			log.Printf("Error querying Prometheus: %v", err)
-			time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
-			continue
-		}
-
-		downCondition, err := prometheus.GetPrometheusCondition(ctx.Config.Metrics.Prometheus.DownCondition, &ctx)
-		if err != nil {
-			log.Printf("Error querying Prometheus: %v", err)
+			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+				message := fmt.Sprintf("Error quering prometheus: %v", err)
+				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
+			}
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
 			continue
 		}
@@ -103,6 +106,13 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			currentSize, maxSize, err := google.AddNodeToMIG(&ctx)
 			if err != nil {
 				log.Printf("Error adding node to MIG: %v", err)
+				if ctx.Config.Notifications.Slack.WebhookURL != "" {
+					message := fmt.Sprintf("Error adding node to MIG: %v", err)
+					err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+					if err != nil {
+						log.Printf("Error sending Slack notification: %v", err)
+					}
+				}
 				time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
 				continue
 			}
@@ -116,11 +126,37 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			}
 			// Sleep for the default cooldown period before checking the conditions again
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
-		} else if downCondition { // If the down condition is met, remove a node from the MIG
+			continue
+		}
+
+		// Fetch the scale down conditions from Prometheus
+		downCondition, err := prometheus.GetPrometheusCondition(ctx.Config.Metrics.Prometheus.DownCondition, &ctx)
+		if err != nil {
+			log.Printf("Error querying Prometheus: %v", err)
+			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+				message := fmt.Sprintf("Error quering prometheus: %v", err)
+				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
+			}
+			time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
+			continue
+		}
+
+		// If the down condition is met, remove a node from the MIG
+		if downCondition {
 			log.Printf("Down condition %s met. Trying to remove one node!", ctx.Config.Metrics.Prometheus.DownCondition)
 			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(&ctx)
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)
+				if ctx.Config.Notifications.Slack.WebhookURL != "" {
+					message := fmt.Sprintf("Error draining node from MIG: %v", err)
+					err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+					if err != nil {
+						log.Printf("Error sending Slack notification: %v", err)
+					}
+				}
 				time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
 				continue
 			}
@@ -134,11 +170,12 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			}
 			// Sleep for the scaledown cooldown period before checking the conditions again
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.ScaleDownCooldownPeriodSec) * time.Second)
-		} else {
-			// No scaling conditions met, so no changes to the MIG
-			log.Printf("No condition %s or %s met, keeping the same number of nodes!", ctx.Config.Metrics.Prometheus.UpCondition, ctx.Config.Metrics.Prometheus.DownCondition)
-			// Sleep for the default cooldown period before checking the conditions again
-			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
+			continue
 		}
+
+		// No scaling conditions met, so no changes to the MIG
+		log.Printf("No condition %s or %s met, keeping the same number of nodes!", ctx.Config.Metrics.Prometheus.UpCondition, ctx.Config.Metrics.Prometheus.DownCondition)
+		// Sleep for the default cooldown period before checking the conditions again
+		time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
 	}
 }

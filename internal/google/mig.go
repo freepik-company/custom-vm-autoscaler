@@ -12,6 +12,7 @@ import (
 
 	"custom-vm-autoscaler/api/v1alpha1"
 	"custom-vm-autoscaler/internal/elasticsearch"
+	"custom-vm-autoscaler/internal/slack"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -93,11 +94,14 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 	// Get a random instance from the MIG to remove
 	instanceToRemove, err := GetInstanceToRemove(ctxConn, client, ctx)
 	if err != nil {
-		return 0, 0, "", fmt.Errorf("error draining Elasticsearch node: %v", err)
+		return 0, 0, "", fmt.Errorf("error getting instance to remove: %v", err)
 	}
 
 	// If not in debug mode, drain the node from Elasticsearch before removal
-	if !ctx.Config.Autoscaler.DebugMode {
+	// Chech if elasticsearch is defined in the target
+	if ctx.Config.Target.Elasticsearch.URL != "" {
+
+		// Try to drain elasticsearch node with a timeout
 		log.Printf("Instance to remove: %s. Draining from elasticsearch cluster", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(ctx, instanceToRemove)
 		if err != nil {
@@ -122,15 +126,23 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 		_, err = client.DeleteInstances(ctxConn, deleteReq)
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("error deleting instance: %v", err)
-		} else {
-			log.Printf("Scaled down MIG successfully %d/%d", targetSize-1, minSize)
 		}
-		// Wait 90 seconds until instance is fully deleted
-		// Google Cloud has a deletion timeout of 90 seconds max
+	}
+
+	log.Printf("Scaled down MIG successfully %d/%d", targetSize-1, minSize)
+
+	// Wait 90 seconds until instance is fully deleted
+	// Google Cloud has a deletion timeout of 90 seconds max
+	if !ctx.Config.Autoscaler.DebugMode {
+		log.Printf("Debug mode enabled. Skipping 90 seconds timeout until instance deletion")
 		time.Sleep(90 * time.Second)
+	}
+
+	// Chech if elasticsearch is defined in the target
+	if ctx.Config.Target.Elasticsearch.URL != "" {
 
 		// Remove the elasticsearch node from cluster settings
-		err = elasticsearch.ClearElasticsearchClusterSettings(ctx)
+		err = elasticsearch.ClearElasticsearchClusterSettings(ctx, instanceToRemove)
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
 		}
@@ -270,20 +282,20 @@ func getMIGInstanceNames(ctxConn context.Context, client *compute.InstanceGroupM
 }
 
 // CheckMIGMinimumSize ensures that the MIG has at least the minimum number of instances running.
-func CheckMIGMinimumSize(ctx *v1alpha1.Context) (int32, error) {
+func CheckMIGMinimumSize(ctx *v1alpha1.Context) error {
 	ctxConn := context.Background()
 
 	// Create a Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create Instance Group Managers client: %v", err)
+		return fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
 	targetSize, err := getMIGTargetSize(ctxConn, client, ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get MIG target size: %v", err)
+		return fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 
 	// Get the scaling limits (minimum and maximum)
@@ -303,12 +315,20 @@ func CheckMIGMinimumSize(ctx *v1alpha1.Context) (int32, error) {
 		if !ctx.Config.Autoscaler.DebugMode {
 			_, err = client.Resize(ctxConn, req)
 			if err != nil {
-				return 0, err
+				return err
 			}
+			log.Printf("MIG %s scaled up to its minimum size %d", ctx.Config.Infrastructure.GCP.MIGName, minSize)
+			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+				message := fmt.Sprintf("MIG %s scaled up to its minimum size %d", ctx.Config.Infrastructure.GCP.MIGName, minSize)
+				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
+			}
+			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
 		}
-		return minSize, nil
-	} else {
-		return 0, fmt.Errorf("MIG size is already at the minimum limit (%d/%d)", targetSize, minSize)
 	}
+
+	return nil
 
 }
