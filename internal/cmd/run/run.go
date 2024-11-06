@@ -103,8 +103,8 @@ func RunCommand(cmd *cobra.Command, args []string) {
 		// If the up condition is met, add a node to the MIG
 		if upCondition {
 			log.Printf("Up condition %s met: Trying to create a new node!", ctx.Config.Metrics.Prometheus.UpCondition)
-			currentSize, maxSize, err := google.AddNodeToMIG(&ctx)
-			if err != nil {
+			currentSize, maxSize, ok, err := google.AddNodeToMIG(&ctx)
+			if err != nil && !ok {
 				log.Printf("Error adding node to MIG: %v", err)
 				if ctx.Config.Notifications.Slack.WebhookURL != "" {
 					message := fmt.Sprintf("Error adding node to MIG: %v", err)
@@ -117,7 +117,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 				continue
 			}
 			// Notify via Slack that a node has been added
-			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+			if ctx.Config.Notifications.Slack.WebhookURL != "" && ok {
 				message := fmt.Sprintf("Added new node to MIG %s. Current size is %d nodes and the maximum nodes to create are %d", ctx.Config.Infrastructure.GCP.MIGName, currentSize, maxSize)
 				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
 				if err != nil {
@@ -147,8 +147,8 @@ func RunCommand(cmd *cobra.Command, args []string) {
 		// If the down condition is met, remove a node from the MIG
 		if downCondition {
 			log.Printf("Down condition %s met. Trying to remove one node!", ctx.Config.Metrics.Prometheus.DownCondition)
-			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(&ctx)
-			if err != nil {
+			currentSize, minSize, nodeRemoved, ok, err := google.RemoveNodeFromMIG(&ctx)
+			if err != nil && !ok {
 				log.Printf("Error draining node from MIG: %v", err)
 				if ctx.Config.Notifications.Slack.WebhookURL != "" {
 					message := fmt.Sprintf("Error draining node from MIG: %v", err)
@@ -161,7 +161,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 				continue
 			}
 			// Notify via Slack that a node has been removed
-			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+			if ctx.Config.Notifications.Slack.WebhookURL != "" && ok {
 				message := fmt.Sprintf("Removed node %s from MIG %s. Current size is %d nodes and the minimum nodes to exist are %d", nodeRemoved, ctx.Config.Infrastructure.GCP.MIGName, currentSize, minSize)
 				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
 				if err != nil {
