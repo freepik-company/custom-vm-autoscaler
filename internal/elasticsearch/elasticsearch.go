@@ -80,9 +80,19 @@ func updateClusterSettings(ctx *v1alpha1.Context, es *elasticsearch.Client, node
 	}
 
 	// Check current exclude IPs
-
-	currentExcludes, ok := currentSettings.Persistent["cluster"].(map[string]interface{})["routing"].(map[string]interface{})["allocation"].(map[string]interface{})["exclude"].(map[string]interface{})["_name"].(string)
-
+	currentExcludes := ""
+	ok := true
+	if cluster, ok := currentSettings.Persistent["cluster"].(map[string]interface{}); ok {
+		if routing, ok := cluster["routing"].(map[string]interface{}); ok {
+			if allocation, ok := routing["allocation"].(map[string]interface{}); ok {
+				if exclude, ok := allocation["exclude"].(map[string]interface{}); ok {
+					if name, ok := exclude["_name"].(string); ok {
+						currentExcludes = name
+					}
+				}
+			}
+		}
+	}
 	if ctx.Config.Autoscaler.DebugMode {
 		log.Printf("Debug mode enabled. Current nodes in exclude settings elasticsearch: %s", string(currentExcludes))
 	}
@@ -244,8 +254,19 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 	}
 
 	// Get current excluded Names
-	currentExcludes, ok := currentSettings.Persistent["cluster"].(map[string]interface{})["routing"].(map[string]interface{})["allocation"].(map[string]interface{})["exclude"].(map[string]interface{})["_name"].(string)
-
+	currentExcludes := ""
+	ok := true
+	if cluster, ok := currentSettings.Persistent["cluster"].(map[string]interface{}); ok {
+		if routing, ok := cluster["routing"].(map[string]interface{}); ok {
+			if allocation, ok := routing["allocation"].(map[string]interface{}); ok {
+				if exclude, ok := allocation["exclude"].(map[string]interface{}); ok {
+					if name, ok := exclude["_name"].(string); ok {
+						currentExcludes = name
+					}
+				}
+			}
+		}
+	}
 	if ctx.Config.Autoscaler.DebugMode {
 		log.Printf("Debug mode enabled. Current nodes in exclude settings elasticsearch: %s", string(currentExcludes))
 	}

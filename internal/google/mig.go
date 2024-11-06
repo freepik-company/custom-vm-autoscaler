@@ -136,8 +136,9 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 	// Wait 90 seconds until instance is fully deleted
 	// Google Cloud has a deletion timeout of 90 seconds max
 	if !ctx.Config.Autoscaler.DebugMode {
-		log.Printf("Debug mode enabled. Skipping 90 seconds timeout until instance deletion")
 		time.Sleep(90 * time.Second)
+	} else {
+		log.Printf("Debug mode enabled. Skipping 90 seconds timeout until instance deletion")
 	}
 
 	// Chech if elasticsearch is defined in the target
