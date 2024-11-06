@@ -85,22 +85,8 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			}
 		}
 
-		// Fetch the scale up and down conditions from Prometheus
+		// Fetch the scale up condition from Prometheus
 		upCondition, err := prometheus.GetPrometheusCondition(ctx.Config.Metrics.Prometheus.UpCondition, &ctx)
-		if err != nil {
-			log.Printf("Error querying Prometheus: %v", err)
-			if ctx.Config.Notifications.Slack.WebhookURL != "" {
-				message := fmt.Sprintf("Error quering prometheus: %v", err)
-				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
-				if err != nil {
-					log.Printf("Error sending Slack notification: %v", err)
-				}
-			}
-			time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
-			continue
-		}
-
-		downCondition, err := prometheus.GetPrometheusCondition(ctx.Config.Metrics.Prometheus.DownCondition, &ctx)
 		if err != nil {
 			log.Printf("Error querying Prometheus: %v", err)
 			if ctx.Config.Notifications.Slack.WebhookURL != "" {
@@ -140,7 +126,26 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			}
 			// Sleep for the default cooldown period before checking the conditions again
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
-		} else if downCondition { // If the down condition is met, remove a node from the MIG
+			continue
+		}
+
+		// Fetch the scale down conditions from Prometheus
+		downCondition, err := prometheus.GetPrometheusCondition(ctx.Config.Metrics.Prometheus.DownCondition, &ctx)
+		if err != nil {
+			log.Printf("Error querying Prometheus: %v", err)
+			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+				message := fmt.Sprintf("Error quering prometheus: %v", err)
+				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
+			}
+			time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
+			continue
+		}
+
+		// If the down condition is met, remove a node from the MIG
+		if downCondition {
 			log.Printf("Down condition %s met. Trying to remove one node!", ctx.Config.Metrics.Prometheus.DownCondition)
 			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(&ctx)
 			if err != nil {
@@ -165,11 +170,12 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			}
 			// Sleep for the scaledown cooldown period before checking the conditions again
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.ScaleDownCooldownPeriodSec) * time.Second)
-		} else {
-			// No scaling conditions met, so no changes to the MIG
-			log.Printf("No condition %s or %s met, keeping the same number of nodes!", ctx.Config.Metrics.Prometheus.UpCondition, ctx.Config.Metrics.Prometheus.DownCondition)
-			// Sleep for the default cooldown period before checking the conditions again
-			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
+			continue
 		}
+
+		// No scaling conditions met, so no changes to the MIG
+		log.Printf("No condition %s or %s met, keeping the same number of nodes!", ctx.Config.Metrics.Prometheus.UpCondition, ctx.Config.Metrics.Prometheus.DownCondition)
+		// Sleep for the default cooldown period before checking the conditions again
+		time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
 	}
 }
