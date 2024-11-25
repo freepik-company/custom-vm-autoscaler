@@ -88,12 +88,14 @@ autoscaler:
   retiryIntervalSec: 10
   minSize: 1
   maxSize: 2
+  scaleUpThreshold: 1
 
   # For advanced custom scaling configuration, when you want a different minSize and maxSize nodes for specific moments
   advancedCustomScalingConfiguration:
     - days: "2,3,4"
       hoursUTC: "5:00:00-8:00:00"
       minSize: 1
+      scaleUpThreshold: 2
     - days: "6,7"
       minSize: 3
 ```

@@ -4,4 +4,5 @@ const (
 	defaultElasticsearchInsecureSkipVerify = false
 	defaultDebugMode                       = false
 	defaultElasticsearchDrainTimeoutSec    = 600
+	defaultScaleUpThreshold                = 1
 )
