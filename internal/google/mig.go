@@ -41,7 +41,7 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 	_, maxSize, scaleUpThreshold, _ := getMIGScalingLimits(ctx)
 
 	// Get the desired size of the MIG
-	desiredSize := targetSize - scaleUpThreshold
+	desiredSize := targetSize + scaleUpThreshold
 
 	// Check if the MIG has reached its maximum size
 	if desiredSize > maxSize {
