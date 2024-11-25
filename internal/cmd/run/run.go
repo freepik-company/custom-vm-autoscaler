@@ -68,6 +68,9 @@ func RunCommand(cmd *cobra.Command, args []string) {
 	if !ctx.Config.Autoscaler.DebugMode {
 		ctx.Config.Autoscaler.DebugMode = defaultDebugMode
 	}
+	if ctx.Config.Autoscaler.ScaleUpThreshold == 0 {
+		ctx.Config.Autoscaler.ScaleUpThreshold = defaultScaleUpThreshold
+	}
 
 	// Main loop to monitor scaling conditions and manage the MIG
 	for {

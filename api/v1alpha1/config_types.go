@@ -43,11 +43,13 @@ type ConfigSpec struct {
 		RetryIntervalSec                   int  `yaml:"retryIntervalSec"`
 		MinSize                            int  `yaml:"minSize"`
 		MaxSize                            int  `yaml:"maxSize"`
+		ScaleUpThreshold                   int  `yaml:"scaleUpThreshold"`
 		AdvancedCustomScalingConfiguration []struct {
-			Days     string `yaml:"days"`
-			HoursUTC string `yaml:"hoursUTC,omitempty"`
-			MinSize  int    `yaml:"minSize"`
-			MaxSize  int    `yaml:"maxSize"`
+			Days             string `yaml:"days"`
+			HoursUTC         string `yaml:"hoursUTC,omitempty"`
+			MinSize          int    `yaml:"minSize"`
+			MaxSize          int    `yaml:"maxSize"`
+			ScaleUpThreshold int    `yaml:"scaleUpThreshold"`
 		} `yaml:"advancedCustomScalingConfiguration,omitempty"`
 	} `yaml:"autoscaler"`
 }

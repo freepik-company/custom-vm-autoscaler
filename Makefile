@@ -141,4 +141,4 @@ package-signature: ## Create a signature for the package.
 .PHONY: run-example
 run-example:
 	@echo "Creating example environment..."
-	docker-compose -f examples/docker-compose.yml up --build
+	docker-compose -f config/samples/docker-compose.yml up --build

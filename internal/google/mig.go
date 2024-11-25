@@ -38,10 +38,13 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
-	_, maxSize := getMIGScalingLimits(ctx)
+	_, maxSize, scaleUpThreshold, _ := getMIGScalingLimits(ctx)
+
+	// Get the desired size of the MIG
+	desiredSize := targetSize + scaleUpThreshold
 
 	// Check if the MIG has reached its maximum size
-	if targetSize >= maxSize {
+	if desiredSize > maxSize {
 		log.Printf("MIG has reached its maximum size (%d/%d), no further scaling is possible", targetSize, maxSize)
 		return -1, -1, nil
 	}
@@ -51,7 +54,7 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
 		Zone:                 ctx.Config.Infrastructure.GCP.Zone,
 		InstanceGroupManager: ctx.Config.Infrastructure.GCP.MIGName,
-		Size:                 targetSize + 1,
+		Size:                 desiredSize,
 	}
 
 	// Resize the MIG if not in debug mode
@@ -60,10 +63,10 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 		if err != nil {
 			return 0, 0, err
 		} else {
-			log.Printf("Scaled up MIG successfully %d/%d", targetSize+1, maxSize)
+			log.Printf("Scaled up MIG successfully %d/%d", desiredSize, maxSize)
 		}
 	}
-	return targetSize + 1, maxSize, nil
+	return desiredSize, maxSize, nil
 }
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
@@ -85,10 +88,13 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 	log.Printf("Current size of MIG is %d nodes", targetSize)
 
 	// Get the scaling limits (minimum and maximum)
-	minSize, _ := getMIGScalingLimits(ctx)
+	minSize, _, _, scaleDownThreshold := getMIGScalingLimits(ctx)
+
+	// Get the desired size of the MIG
+	desiredSize := targetSize - scaleDownThreshold
 
 	// Check if the MIG has reached its minimum size
-	if targetSize <= minSize {
+	if desiredSize < minSize {
 		log.Printf("MIG has reached its minimum size (%d/%d), no further scaling down is possible", targetSize, minSize)
 		return -1, -1, "", nil
 	}
@@ -131,7 +137,7 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 		}
 	}
 
-	log.Printf("Scaled down MIG successfully %d/%d", targetSize-1, minSize)
+	log.Printf("Scaled down MIG successfully %d/%d", desiredSize, minSize)
 
 	// Wait 90 seconds until instance is fully deleted
 	// Google Cloud has a deletion timeout of 90 seconds max
@@ -152,15 +158,28 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 		log.Printf("Cleared up elasticsearch settings for draining node")
 	}
 
-	return targetSize - 1, minSize, instanceToRemove, nil
+	return desiredSize, minSize, instanceToRemove, nil
 }
 
-// getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG).
-func getMIGScalingLimits(ctx *v1alpha1.Context) (int32, int32) {
+// getMIGScalingLimits retrieves the minimum and maximum scaling limits for a Managed Instance Group (MIG) and how many nodes to scale up/down.
+func getMIGScalingLimits(ctx *v1alpha1.Context) (int32, int32, int32, int32) {
 	currentTime := time.Now().UTC()
 	currentWeekday := int(currentTime.Weekday())
+	var scaleDownThreshold int32 = 1
 
 	for _, scalingConfig := range ctx.Config.Autoscaler.AdvancedCustomScalingConfiguration {
+
+		// Set default values if not provided
+		if scalingConfig.ScaleUpThreshold == 0 {
+			scalingConfig.ScaleUpThreshold = ctx.Config.Autoscaler.ScaleUpThreshold
+		}
+		if scalingConfig.MinSize == 0 {
+			scalingConfig.MinSize = ctx.Config.Autoscaler.MinSize
+		}
+		if scalingConfig.MaxSize == 0 {
+			scalingConfig.MaxSize = ctx.Config.Autoscaler.MaxSize
+		}
+
 		// Check if current day is within the critical period days
 		criticalPeriodDays := strings.Split(scalingConfig.Days, ",")
 		for _, criticalPeriodDay := range criticalPeriodDays {
@@ -169,18 +188,18 @@ func getMIGScalingLimits(ctx *v1alpha1.Context) (int32, int32) {
 					criticalPeriodHours := strings.Split(scalingConfig.HoursUTC, "-")
 					if len(criticalPeriodHours) != 2 {
 						log.Fatalf("Invalid hours format in advanced_scaling_configuration. Expected start and end hours separated by a dash (e.g., 4:00:00-6:00:00)")
-						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize), int32(ctx.Config.Autoscaler.ScaleUpThreshold), scaleDownThreshold
 					}
 					// Parse start and end hours
 					startHour, err := time.Parse("15:04:05", criticalPeriodHours[0])
 					if err != nil {
 						log.Printf("Error parsing start hour: %v", err)
-						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize), int32(ctx.Config.Autoscaler.ScaleUpThreshold), scaleDownThreshold
 					}
 					endHour, err := time.Parse("15:04:05", criticalPeriodHours[1])
 					if err != nil {
 						log.Printf("Error parsing end hour: %v", err)
-						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize), int32(ctx.Config.Autoscaler.ScaleUpThreshold), scaleDownThreshold
 					}
 
 					// Adjust start and end times to match the current date
@@ -189,17 +208,17 @@ func getMIGScalingLimits(ctx *v1alpha1.Context) (int32, int32) {
 
 					// Check if current time is within the critical period
 					if currentTime.After(startTime) && currentTime.Before(endTime) {
-						return int32(scalingConfig.MinSize), int32(scalingConfig.MaxSize)
+						return int32(scalingConfig.MinSize), int32(scalingConfig.MaxSize), int32(scalingConfig.ScaleUpThreshold), scaleDownThreshold
 					}
 				} else {
 					// If no hours are provided, assume critical period is for the entire day
-					return int32(scalingConfig.MinSize), int32(scalingConfig.MaxSize)
+					return int32(scalingConfig.MinSize), int32(scalingConfig.MaxSize), int32(scalingConfig.ScaleUpThreshold), scaleDownThreshold
 				}
 			}
 		}
 	}
 
-	return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize)
+	return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize), int32(ctx.Config.Autoscaler.ScaleUpThreshold), scaleDownThreshold
 }
 
 // getMIGTargetSize retrieves the current target size of a Managed Instance Group (MIG).
@@ -301,8 +320,8 @@ func CheckMIGMinimumSize(ctx *v1alpha1.Context) error {
 		return fmt.Errorf("failed to get MIG target size: %v", err)
 	}
 
-	// Get the scaling limits (minimum and maximum)
-	minSize, _ := getMIGScalingLimits(ctx)
+	// Get the scaling limits (minimum and maximum) and scaling up/down thresholds
+	minSize, _, _, _ := getMIGScalingLimits(ctx)
 
 	// If the MIG size is below the minimum, scale it up to the minimum size
 	if targetSize < minSize {
