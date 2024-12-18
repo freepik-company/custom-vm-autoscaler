@@ -65,6 +65,9 @@ func RunCommand(cmd *cobra.Command, args []string) {
 	if ctx.Config.Target.Elasticsearch.DrainTimeoutSec == 0 {
 		ctx.Config.Target.Elasticsearch.DrainTimeoutSec = defaultElasticsearchDrainTimeoutSec
 	}
+	if ctx.Config.Target.Elasticsearch.RejoinTimeoutSec == 0 {
+		ctx.Config.Target.Elasticsearch.RejoinTimeoutSec = defaultElasticsearchRejoinTimeoutSec
+	}
 	if !ctx.Config.Autoscaler.DebugMode {
 		ctx.Config.Autoscaler.DebugMode = defaultDebugMode
 	}

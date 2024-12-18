@@ -27,6 +27,7 @@ type ConfigSpec struct {
 			Password              string `yaml:"password,omitempty"`
 			SSLInsecureSkipVerify bool   `yaml:"sslInsecureSkipVerify,omitempty"`
 			DrainTimeoutSec       int    `yaml:"drainTimeoutSec,omitempty"`
+			RejoinTimeoutSec	  int    `yaml:"rejoinTimeoutSec,omitempty"`
 		} `yaml:"elasticsearch,omitempty"`
 	} `yaml:"target"`
 
