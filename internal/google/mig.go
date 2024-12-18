@@ -149,13 +149,21 @@ func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
 
 	// Chech if elasticsearch is defined in the target
 	if ctx.Config.Target.Elasticsearch.URL != "" {
-
-		// Remove the elasticsearch node from cluster settings
 		err = elasticsearch.ClearElasticsearchClusterSettings(ctx, instanceToRemove)
 		if err != nil {
-			return 0, 0, "", fmt.Errorf("error clearing Elasticsearch cluster settings: %v", err)
+			log.Printf("Error clearing Elasticsearch cluster settings: %v", err)
+
+			// Attempt to revert cluster settings if the timeout occurred
+			revertErr := elasticsearch.UndrainElasticsearchNode(ctx, instanceToRemove)
+			if revertErr != nil {
+				log.Printf("Error reverting Elasticsearch cluster settings: %v", revertErr)
+				return 0, 0, "", fmt.Errorf("error reverting Elasticsearch cluster settings after timeout: %v", revertErr)
+			}
+
+			log.Printf("Node %s successfully reintegrated into Elasticsearch cluster after timeout", instanceToRemove)
+			return 0, 0, "", fmt.Errorf("node reintegrated due to timeout during removal")
 		}
-		log.Printf("Cleared up elasticsearch settings for draining node")
+		log.Printf("Cleared Elasticsearch settings for draining node")
 	}
 
 	return desiredSize, minSize, instanceToRemove, nil
