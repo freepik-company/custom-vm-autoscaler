@@ -169,6 +169,13 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 					log.Printf("Error sending Slack notification: %v", err)
 				}
 			}
+
+			// Add node again to the cluster settings
+			err = ClearElasticsearchClusterSettings(ctx, nodeName)
+			if err != nil {
+				return fmt.Errorf("error clearing cluster settings: %w", err)
+			}
+
 			return fmt.Errorf("timeout trying to remove node from cluster settings in elasticsearch: %v", ctxWithTimeout.Err())
 		default:
 			// Get _cat/shards to check if nodeName has any shard inside
