@@ -21,6 +21,14 @@ const (
 	Run the autoscaler with custom config file`
 )
 
+var (
+	err         error
+	currentSize int32
+	maxSize     int32
+	minSize     int32
+	nodeRemoved string
+)
+
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                   "run",
@@ -76,7 +84,11 @@ func RunCommand(cmd *cobra.Command, args []string) {
 	for {
 
 		// Check if the MIG is at its minimum size at least. If not, scale it up to minSize
-		err := google.CheckMIGMinimumSize(&ctx)
+		if ctx.Config.Infrastructure.GCP.Zone != "" {
+			err = google.CheckMIGMinimumSize(&ctx)
+		} else {
+			err = google.CheckRegionalMIGMinimumSize(&ctx)
+		}
 		if err != nil {
 			log.Fatalf("Error checking minimum size for MIG nodes: %v", err)
 			if ctx.Config.Notifications.Slack.WebhookURL != "" {
@@ -106,7 +118,11 @@ func RunCommand(cmd *cobra.Command, args []string) {
 		// If the up condition is met, add a node to the MIG
 		if upCondition {
 			log.Printf("Up condition %s met: Trying to create a new node!", ctx.Config.Metrics.Prometheus.UpCondition)
-			currentSize, maxSize, err := google.AddNodeToMIG(&ctx)
+			if ctx.Config.Infrastructure.GCP.Zone != "" {
+				currentSize, maxSize, err = google.AddNodeToMIG(&ctx)
+			} else {
+				currentSize, maxSize, err = google.AddNodeToRegionalMIG(&ctx)
+			}
 			if err != nil {
 				log.Printf("Error adding node to MIG: %v", err)
 				if ctx.Config.Notifications.Slack.WebhookURL != "" {
@@ -150,7 +166,11 @@ func RunCommand(cmd *cobra.Command, args []string) {
 		// If the down condition is met, remove a node from the MIG
 		if downCondition {
 			log.Printf("Down condition %s met. Trying to remove one node!", ctx.Config.Metrics.Prometheus.DownCondition)
-			currentSize, minSize, nodeRemoved, err := google.RemoveNodeFromMIG(&ctx)
+			if ctx.Config.Infrastructure.GCP.Zone != "" {
+				currentSize, minSize, nodeRemoved, err = google.RemoveNodeFromMIG(&ctx)
+			} else {
+				currentSize, minSize, nodeRemoved, err = google.RemoveNodeFromRegionalMIG(&ctx)
+			}
 			if err != nil {
 				log.Printf("Error draining node from MIG: %v", err)
 				if ctx.Config.Notifications.Slack.WebhookURL != "" {

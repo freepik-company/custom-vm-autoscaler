@@ -14,7 +14,8 @@ type ConfigSpec struct {
 	Infrastructure struct {
 		GCP struct {
 			ProjectID       string `yaml:"projectId"`
-			Zone            string `yaml:"zone"`
+			Zone            string `yaml:"zone,omitempty"`
+			Region          string `yaml:"region,omitempty"`
 			MIGName         string `yaml:"migName"`
 			CredentialsFile string `yaml:"credentialsFile,omitempty"`
 		} `yaml:"gcp"`
