@@ -240,10 +240,9 @@ func getRegionalMIGInstanceNames(ctxConn context.Context, client *compute.Region
 
 // getZoneFromURL extracts the zone from a Google Cloud instance URL
 func getZoneFromURL(instanceURL string) string {
-	// The URL format is: projects/{project}/zones/{zone}/instances/{instance}
 	parts := strings.Split(instanceURL, "/")
-	if len(parts) >= 4 {
-		return parts[3]
+	if len(parts) > 0 {
+		return parts[len(parts)-3]
 	}
 	return ""
 }
