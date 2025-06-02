@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"strings"
 	"time"
 
 	"custom-vm-autoscaler/api/v1alpha1"
@@ -98,7 +99,7 @@ func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, err
 	}
 
 	// Get a random instance from the MIG to remove
-	instanceToRemove, err := GetRegionalInstanceToRemove(ctxConn, client, ctx)
+	instanceToRemove, zoneToRemove, err := GetRegionalInstanceToRemove(ctxConn, client, ctx)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("error getting instance to remove: %v", err)
 	}
@@ -117,7 +118,7 @@ func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, err
 	}
 
 	// Create a request to delete the selected instance and reduce the MIG size
-	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", ctx.Config.Infrastructure.GCP.ProjectID, ctx.Config.Infrastructure.GCP.Zone, instanceToRemove)
+	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", ctx.Config.Infrastructure.GCP.ProjectID, zoneToRemove, instanceToRemove)
 	deleteReq := &computepb.DeleteInstancesRegionInstanceGroupManagerRequest{
 		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
 		Region:               ctx.Config.Infrastructure.GCP.Region,
@@ -179,28 +180,28 @@ func getRegionalMIGTargetSize(ctxConn context.Context, client *compute.RegionIns
 }
 
 // GetInstanceToRemove retrieves a random instance from the MIG to be removed.
-func GetRegionalInstanceToRemove(ctxConn context.Context, client *compute.RegionInstanceGroupManagersClient, ctx *v1alpha1.Context) (string, error) {
+func GetRegionalInstanceToRemove(ctxConn context.Context, client *compute.RegionInstanceGroupManagersClient, ctx *v1alpha1.Context) (string, string, error) {
 	// Get the list of instances in the MIG
 	instanceNames, err := getRegionalMIGInstanceNames(ctxConn, client, ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(instanceNames) == 0 {
-		return "", fmt.Errorf("no instances found in the MIG")
+		return "", "", fmt.Errorf("no instances found in the MIG")
 	}
 
 	// Randomly select an instance to remove
 	randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(instanceNames))))
 	if err != nil {
-		return "", fmt.Errorf("error selecting random instance: %v", err)
+		return "", "", fmt.Errorf("error selecting random instance: %v", err)
 	}
 	randomInstance := int(randomIndex.Int64())
 
-	return getInstanceNameFromURL(instanceNames[randomInstance]), nil
+	return instanceNames[randomInstance]["name"], instanceNames[randomInstance]["zone"], nil
 }
 
 // getMIGInstanceNames retrieves the list of instance names in a Managed Instance Group (MIG).
-func getRegionalMIGInstanceNames(ctxConn context.Context, client *compute.RegionInstanceGroupManagersClient, ctx *v1alpha1.Context) ([]string, error) {
+func getRegionalMIGInstanceNames(ctxConn context.Context, client *compute.RegionInstanceGroupManagersClient, ctx *v1alpha1.Context) ([]map[string]string, error) {
 	// Create a request to list the managed instances in the MIG
 	req := &computepb.ListManagedInstancesRegionInstanceGroupManagersRequest{
 		Project:              ctx.Config.Infrastructure.GCP.ProjectID,
@@ -211,10 +212,10 @@ func getRegionalMIGInstanceNames(ctxConn context.Context, client *compute.Region
 	// Call the API and get an iterator for the managed instances
 	it := client.ListManagedInstances(ctxConn, req)
 
-	// Store the instance names in a slice
-	var instanceNames []string
+	// Store the instance names and zones in a slice of maps
+	var instanceNames []map[string]string
 
-	// Iterate through the instances and collect their names
+	// Iterate through the instances and collect their names and zones
 	for {
 		instance, err := it.Next()
 		if err == iterator.Done {
@@ -224,11 +225,27 @@ func getRegionalMIGInstanceNames(ctxConn context.Context, client *compute.Region
 			return nil, fmt.Errorf("failed to list managed instances: %v", err)
 		}
 
-		// Append the instance name to the list
-		instanceNames = append(instanceNames, *instance.Instance)
+		// Create a map with instance name and zone
+		instanceInfo := map[string]string{
+			"name": getInstanceNameFromURL(*instance.Instance),
+			"zone": getZoneFromURL(*instance.Instance),
+		}
+
+		// Append the instance info to the list
+		instanceNames = append(instanceNames, instanceInfo)
 	}
 
 	return instanceNames, nil
+}
+
+// getZoneFromURL extracts the zone from a Google Cloud instance URL
+func getZoneFromURL(instanceURL string) string {
+	// The URL format is: projects/{project}/zones/{zone}/instances/{instance}
+	parts := strings.Split(instanceURL, "/")
+	if len(parts) >= 4 {
+		return parts[3]
+	}
+	return ""
 }
 
 // CheckMIGMinimumSize ensures that the MIG has at least the minimum number of instances running.
