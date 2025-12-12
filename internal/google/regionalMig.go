@@ -20,7 +20,8 @@ import (
 
 // AddNodeToRegionalMIG increases the size of the Managed Instance Group (MIG) by 1, if it has not reached the maximum limit.
 func AddNodeToRegionalMIG(ctx *v1alpha1.Context) (int32, int32, error) {
-	ctxConn := context.Background()
+	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewRegionInstanceGroupManagersRESTClient)
@@ -70,7 +71,8 @@ func AddNodeToRegionalMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
 func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
-	ctxConn := context.Background()
+	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewRegionInstanceGroupManagersRESTClient)
@@ -249,7 +251,8 @@ func getZoneFromURL(instanceURL string) string {
 
 // CheckMIGMinimumSize ensures that the MIG has at least the minimum number of instances running.
 func CheckRegionalMIGMinimumSize(ctx *v1alpha1.Context) error {
-	ctxConn := context.Background()
+	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Create a Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewRegionInstanceGroupManagersRESTClient)

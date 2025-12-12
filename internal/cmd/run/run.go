@@ -90,7 +90,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 			err = google.CheckRegionalMIGMinimumSize(&ctx)
 		}
 		if err != nil {
-			log.Fatalf("Error checking minimum size for MIG nodes: %v", err)
+			log.Printf("Error checking minimum size for MIG nodes: %v", err)
 			if ctx.Config.Notifications.Slack.WebhookURL != "" {
 				message := fmt.Sprintf("Error checking minimum size for MIG nodes: %v", err)
 				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
@@ -98,6 +98,8 @@ func RunCommand(cmd *cobra.Command, args []string) {
 					log.Printf("Error sending Slack notification: %v", err)
 				}
 			}
+			time.Sleep(time.Duration(ctx.Config.Autoscaler.RetryIntervalSec) * time.Second)
+			continue
 		}
 
 		// Fetch the scale up condition from Prometheus

@@ -21,7 +21,8 @@ import (
 
 // AddNodeToMIG increases the size of the Managed Instance Group (MIG) by 1, if it has not reached the maximum limit.
 func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
-	ctxConn := context.Background()
+	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
@@ -71,7 +72,8 @@ func AddNodeToMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
 func RemoveNodeFromMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
-	ctxConn := context.Background()
+	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Create a new Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)
@@ -187,7 +189,7 @@ func getMIGScalingLimits(ctx *v1alpha1.Context) (int32, int32, int32, int32) {
 				if scalingConfig.HoursUTC != "" {
 					criticalPeriodHours := strings.Split(scalingConfig.HoursUTC, "-")
 					if len(criticalPeriodHours) != 2 {
-						log.Fatalf("Invalid hours format in advanced_scaling_configuration. Expected start and end hours separated by a dash (e.g., 4:00:00-6:00:00)")
+						log.Printf("Invalid hours format in advanced_scaling_configuration. Expected start and end hours separated by a dash (e.g., 4:00:00-6:00:00)")
 						return int32(ctx.Config.Autoscaler.MinSize), int32(ctx.Config.Autoscaler.MaxSize), int32(ctx.Config.Autoscaler.ScaleUpThreshold), scaleDownThreshold
 					}
 					// Parse start and end hours
@@ -305,7 +307,8 @@ func getMIGInstanceNames(ctxConn context.Context, client *compute.InstanceGroupM
 
 // CheckMIGMinimumSize ensures that the MIG has at least the minimum number of instances running.
 func CheckMIGMinimumSize(ctx *v1alpha1.Context) error {
-	ctxConn := context.Background()
+	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Create a Compute client for managing the MIG
 	client, err := createComputeClient(ctxConn, ctx, compute.NewInstanceGroupManagersRESTClient)

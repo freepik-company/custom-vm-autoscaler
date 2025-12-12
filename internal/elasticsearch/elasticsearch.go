@@ -186,10 +186,10 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 			if err != nil {
 				return fmt.Errorf("failed to get shards information: %w", err)
 			}
-			defer res.Body.Close()
 
 			// Get response
 			body, err := io.ReadAll(res.Body)
+			res.Body.Close() // Close immediately after reading, not with defer in a loop
 			if err != nil || string(body) == "" {
 				return fmt.Errorf("error reading response body: %w", err)
 			}
