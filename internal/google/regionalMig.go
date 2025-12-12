@@ -71,18 +71,23 @@ func AddNodeToRegionalMIG(ctx *v1alpha1.Context) (int32, int32, error) {
 
 // RemoveNodeFromMIG decreases the size of the Managed Instance Group (MIG) by 1, if it has not reached the minimum limit.
 func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, error) {
-	ctxConn, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// Step 1: Use a context with timeout for initial GCP operations (get info)
+	var targetSize, minSize, desiredSize int32
+	var instanceToRemove, zoneToRemove string
+	var client *compute.RegionInstanceGroupManagersClient
+
+	ctxInfo, cancelInfo := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelInfo()
 
 	// Create a new Compute client for managing the MIG
-	client, err := createComputeClient(ctxConn, ctx, compute.NewRegionInstanceGroupManagersRESTClient)
+	client, err := createComputeClient(ctxInfo, ctx, compute.NewRegionInstanceGroupManagersRESTClient)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("failed to create Instance Group Managers client: %v", err)
 	}
 	defer client.Close()
 
 	// Get the current target size of the MIG
-	targetSize, err := getRegionalMIGTargetSize(ctxConn, client, ctx)
+	targetSize, err = getRegionalMIGTargetSize(ctxInfo, client, ctx)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("failed to get MIG target size: %v", err)
 	}
@@ -92,7 +97,7 @@ func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, err
 	minSize, _, _, scaleDownThreshold := getMIGScalingLimits(ctx)
 
 	// Get the desired size of the MIG
-	desiredSize := targetSize - scaleDownThreshold
+	desiredSize = targetSize - scaleDownThreshold
 
 	// Check if the MIG has reached its minimum size
 	if desiredSize < minSize {
@@ -101,15 +106,14 @@ func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, err
 	}
 
 	// Get a random instance from the MIG to remove
-	instanceToRemove, zoneToRemove, err := GetRegionalInstanceToRemove(ctxConn, client, ctx)
+	instanceToRemove, zoneToRemove, err = GetRegionalInstanceToRemove(ctxInfo, client, ctx)
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("error getting instance to remove: %v", err)
 	}
 
-	// If not in debug mode, drain the node from Elasticsearch before removal
-	// Chech if elasticsearch is defined in the target
+	// Step 2: Drain Elasticsearch node (no timeout here, it has its own internal timeout)
+	// Check if elasticsearch is defined in the target
 	if ctx.Config.Target.Elasticsearch.URL != "" {
-
 		// Try to drain elasticsearch node with a timeout
 		log.Printf("Instance to remove: %s. Draining from elasticsearch cluster", instanceToRemove)
 		err = elasticsearch.DrainElasticsearchNode(ctx, instanceToRemove)
@@ -118,6 +122,10 @@ func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, err
 		}
 		log.Printf("Instance drained successfully from elasticsearch cluster")
 	}
+
+	// Step 3: Use a separate context with timeout for the delete operation
+	ctxDelete, cancelDelete := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelDelete()
 
 	// Create a request to delete the selected instance and reduce the MIG size
 	instanceURL := fmt.Sprintf("projects/%s/zones/%s/instances/%s", ctx.Config.Infrastructure.GCP.ProjectID, zoneToRemove, instanceToRemove)
@@ -132,7 +140,7 @@ func RemoveNodeFromRegionalMIG(ctx *v1alpha1.Context) (int32, int32, string, err
 
 	// Delete the instance if not in debug mode
 	if !ctx.Config.Autoscaler.DebugMode {
-		_, err = client.DeleteInstances(ctxConn, deleteReq)
+		_, err = client.DeleteInstances(ctxDelete, deleteReq)
 		if err != nil {
 			return 0, 0, "", fmt.Errorf("error deleting instance: %v", err)
 		}
