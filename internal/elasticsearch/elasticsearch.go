@@ -333,3 +333,189 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 
 	return nil
 }
+
+func UndrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify,
+			MinVersion:         tls.VersionTLS13,
+		},
+	}
+
+	// Create Elasticsearch config for connection
+	cfg := elasticsearch.Config{
+		Addresses: []string{ctx.Config.Target.Elasticsearch.URL},
+		Username:  ctx.Config.Target.Elasticsearch.User,
+		Password:  ctx.Config.Target.Elasticsearch.Password,
+		Transport: tr,
+	}
+
+	// Creates new client
+	es, err := elasticsearch.NewClient(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
+	}
+
+	// Include the node IP back into routing allocations
+	err = revertClusterSettings(ctx, es, nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to revert cluster settings: %w", err)
+	}
+
+	// Verify the node is rejoined to the cluster
+	if !ctx.Config.Autoscaler.DebugMode {
+		err = waitForNodeRejoin(ctx, es, nodeName)
+		if err != nil {
+			return fmt.Errorf("failed while waiting for node rejoin: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// revertClusterSettings reverts the cluster settings to include a specific node in routing allocations.
+func revertClusterSettings(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeName string) error {
+
+	// Get current cluster settings
+	res, err := es.Cluster.GetSettings()
+	if err != nil {
+		return fmt.Errorf("failed to get current cluster settings: %w", err)
+	}
+	defer res.Body.Close()
+
+	// Decode response
+	var currentSettings v1alpha1.ElasticsearchSettings
+	if err := json.NewDecoder(res.Body).Decode(&currentSettings); err != nil {
+		return fmt.Errorf("failed to decode cluster settings response: %w", err)
+	}
+
+	// Get current excluded IPs
+	currentExcludes := ""
+	ok := true
+	if cluster, ok := currentSettings.Persistent["cluster"].(map[string]interface{}); ok {
+		if routing, ok := cluster["routing"].(map[string]interface{}); ok {
+			if allocation, ok := routing["allocation"].(map[string]interface{}); ok {
+				if exclude, ok := allocation["exclude"].(map[string]interface{}); ok {
+					if name, ok := exclude["_name"].(string); ok {
+						currentExcludes = name
+					}
+				}
+			}
+		}
+	}
+
+	if ok && currentExcludes != "" {
+		excludedNames := strings.Split(currentExcludes, ",")
+		filteredExcludes := []string{}
+		for _, name := range excludedNames {
+			// Create new Excludes without the node to be included in the config again
+			if name != nodeName {
+				filteredExcludes = append(filteredExcludes, name)
+			}
+		}
+		// Set the new node excluded list
+		nodeName = strings.Join(filteredExcludes, ",")
+	}
+
+
+	// _cluster/settings to set
+	newExcludes := nodeName
+	settings := map[string]map[string]string{
+		"persistent": {
+			"cluster.routing.allocation.exclude._name": newExcludes,
+		},
+	}
+
+	// Parse settings into JSON
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings to JSON: %w", err)
+	}
+
+	// Log debug info
+	if ctx.Config.Autoscaler.DebugMode {
+		log.Printf("Debug mode enabled. Skipping PUT _cluster/settings command. Command to execute: %s", string(data))
+		return nil
+	}
+
+	// Update cluster settings
+	req := bytes.NewReader(data)
+	res, err = es.Cluster.PutSettings(req)
+	if err != nil {
+		return fmt.Errorf("failed to update cluster settings: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("error updating cluster settings: %s", res.String())
+	}
+
+	log.Printf("Successfully reverted cluster settings for node: %s", nodeName)
+	return nil
+}
+
+// waitForNodeRejoin waits for the node to rejoin the cluster.
+func waitForNodeRejoin(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeName string) error {
+
+	// Create a context with timeout
+	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), time.Duration(ctx.Config.Target.Elasticsearch.RejoinTimeoutSec)*time.Second)
+	defer cancel()
+
+	for {
+
+		// Check if context is done for timeout
+		select {
+		case <-ctxWithTimeout.Done():
+			if ctx.Config.Notifications.Slack.WebhookURL != "" {
+				message := fmt.Sprintf("Timeout waiting for node %s to rejoin Elasticsearch cluster. Timeout reached in %d seconds", nodeName, ctx.Config.Target.Elasticsearch.RejoinTimeoutSec)
+				err := slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
+				if err != nil {
+					log.Printf("Error sending Slack notification: %v", err)
+				}
+			}
+			return fmt.Errorf("timeout waiting for node %s to rejoin cluster: %v", nodeName, ctxWithTimeout.Err())
+		default:
+			// Get _cat/nodes to check if the node has rejoined
+			res, err := es.Cat.Nodes(
+				es.Cat.Nodes.WithFormat("json"),
+				es.Cat.Nodes.WithV(true),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to get nodes information: %w", err)
+			}
+			defer res.Body.Close()
+
+			// Get response
+			body, err := io.ReadAll(res.Body)
+			if err != nil || string(body) == "" {
+				return fmt.Errorf("error reading response body: %w", err)
+			}
+
+			// Parse response into JSON
+			var nodes []v1alpha1.NodeInfo
+			err = json.Unmarshal([]byte(string(body)), &nodes)
+			if err != nil {
+				return fmt.Errorf("error deserializing JSON: %w", err)
+			}
+
+			// Check if the node has rejoined
+			nodeFound := false
+			for _, node := range nodes {
+				if node.Name == nodeName {
+					nodeFound = true
+					break
+				}
+			}
+			// If nodeFound is false, there is not any node with the name nodeName. It has rejoined
+			if nodeFound {
+				log.Printf("Node %s successfully rejoined the cluster", nodeName)
+				return nil
+			}
+
+			// Sleep briefly before next check
+			log.Printf("Node %s has not yet rejoined the cluster. Retrying...", nodeName)
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
