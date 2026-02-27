@@ -20,6 +20,9 @@ import (
 	"github.com/elastic/go-elasticsearch/v8"
 )
 
+// esRequestTimeout is the maximum time for individual ES HTTP requests.
+const esRequestTimeout = 30 * time.Second
+
 // newESClient creates a new Elasticsearch client from the context configuration.
 func newESClient(ctx *v1alpha1.Context) (*elasticsearch.Client, error) {
 	tr := &http.Transport{
@@ -27,6 +30,7 @@ func newESClient(ctx *v1alpha1.Context) (*elasticsearch.Client, error) {
 			InsecureSkipVerify: ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify,
 			MinVersion:         tls.VersionTLS13,
 		},
+		ResponseHeaderTimeout: esRequestTimeout,
 	}
 
 	cfg := elasticsearch.Config{
@@ -67,8 +71,11 @@ func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
 // updateClusterSettings updates the cluster settings to exclude a specific node IP.
 func updateClusterSettings(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeName string) error {
 
+	reqCtx, reqCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+	defer reqCancel()
+
 	// Get current cluster settings
-	res, err := es.Cluster.GetSettings()
+	res, err := es.Cluster.GetSettings(es.Cluster.GetSettings.WithContext(reqCtx))
 	if err != nil {
 		return fmt.Errorf("failed to get current cluster settings: %w", err)
 	}
@@ -130,8 +137,11 @@ func updateClusterSettings(ctx *v1alpha1.Context, es *elasticsearch.Client, node
 
 	// Execute PUT _cluster/settings command
 	if !ctx.Config.Autoscaler.DebugMode {
+		putCtx, putCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+		defer putCancel()
+
 		req := bytes.NewReader(data)
-		res, err = es.Cluster.PutSettings(req)
+		res, err = es.Cluster.PutSettings(req, es.Cluster.PutSettings.WithContext(putCtx))
 		if err != nil {
 			return fmt.Errorf("failed to update cluster settings: %w", err)
 		}
@@ -235,8 +245,11 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
 
+	getCtx, getCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+	defer getCancel()
+
 	// Get current cluster settings
-	res, err := es.Cluster.GetSettings()
+	res, err := es.Cluster.GetSettings(es.Cluster.GetSettings.WithContext(getCtx))
 	if err != nil {
 		return fmt.Errorf("failed to get current cluster settings: %w", err)
 	}
@@ -307,8 +320,11 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 
 	// Execute PUT _cluster/settings
 	if !ctx.Config.Autoscaler.DebugMode {
+		putCtx, putCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+		defer putCancel()
+
 		req := bytes.NewReader(data)
-		res, err = es.Cluster.PutSettings(req)
+		res, err = es.Cluster.PutSettings(req, es.Cluster.PutSettings.WithContext(putCtx))
 		if err != nil {
 			return fmt.Errorf("failed to update cluster settings: %w", err)
 		}
@@ -340,8 +356,12 @@ func updateIndexReplicas(ctx *v1alpha1.Context, es *elasticsearch.Client, indexN
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
+	putCtx, putCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+	defer putCancel()
+
 	res, err := es.Indices.PutSettings(
 		bytes.NewReader(data),
+		es.Indices.PutSettings.WithContext(putCtx),
 		es.Indices.PutSettings.WithIndex(indexName),
 	)
 	if err != nil {
@@ -382,7 +402,11 @@ func getIndicesForAliases(es *elasticsearch.Client, aliases []string) ([]v1alpha
 		return nil, nil
 	}
 
+	aliasCtx, aliasCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+	defer aliasCancel()
+
 	res, err := es.Cat.Aliases(
+		es.Cat.Aliases.WithContext(aliasCtx),
 		es.Cat.Aliases.WithName(aliases...),
 		es.Cat.Aliases.WithFormat("json"),
 	)
@@ -415,7 +439,11 @@ func getIndicesForAliases(es *elasticsearch.Client, aliases []string) ([]v1alpha
 	}
 
 	// Get full index info for resolved indices
+	idxCtx, idxCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+	defer idxCancel()
+
 	res, err = es.Cat.Indices(
+		es.Cat.Indices.WithContext(idxCtx),
 		es.Cat.Indices.WithIndex(indexNames...),
 		es.Cat.Indices.WithFormat("json"),
 	)
@@ -443,7 +471,11 @@ func getNodeCountForIndices(es *elasticsearch.Client, indexNames []string) (int,
 		return 0, nil
 	}
 
+	shardCtx, shardCancel := context.WithTimeout(context.Background(), esRequestTimeout)
+	defer shardCancel()
+
 	res, err := es.Cat.Shards(
+		es.Cat.Shards.WithContext(shardCtx),
 		es.Cat.Shards.WithIndex(indexNames...),
 		es.Cat.Shards.WithFormat("json"),
 	)
