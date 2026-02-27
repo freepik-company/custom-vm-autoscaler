@@ -320,35 +320,6 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 	return nil
 }
 
-// getDataNodeCount returns the number of data nodes in the Elasticsearch cluster.
-func getDataNodeCount(es *elasticsearch.Client) (int, error) {
-	res, err := es.Cat.Nodes(
-		es.Cat.Nodes.WithFormat("json"),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get nodes information: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.IsError() {
-		return 0, fmt.Errorf("error getting nodes: %s", res.String())
-	}
-
-	var nodes []v1alpha1.NodeInfo
-	if err := json.NewDecoder(res.Body).Decode(&nodes); err != nil {
-		return 0, fmt.Errorf("failed to decode nodes response: %w", err)
-	}
-
-	count := 0
-	for _, node := range nodes {
-		if strings.Contains(node.NodeRole, "d") {
-			count++
-		}
-	}
-
-	return count, nil
-}
-
 // getIndices returns the list of indices in the Elasticsearch cluster.
 func getIndices(es *elasticsearch.Client) ([]v1alpha1.IndexInfo, error) {
 	res, err := es.Cat.Indices(
@@ -405,17 +376,15 @@ func updateIndexReplicas(ctx *v1alpha1.Context, es *elasticsearch.Client, indexN
 	return nil
 }
 
-// calculateDesiredReplicas computes the optimal number of replicas for an index.
-// Returns the desired replica count and whether an update is needed.
-func calculateDesiredReplicas(nodeCount, primaries, currentReplicas, maxReplicas, minReplicas int) (int, bool) {
-	if primaries <= 0 {
-		return currentReplicas, false
-	}
-	if nodeCount <= 0 {
-		return minReplicas, minReplicas != currentReplicas
+// calculateDesiredReplicas computes the optimal number of replicas for a group of indices.
+// totalPrimaries is the sum of primary shards across all indices in the group.
+// The formula ensures totalPrimaries × (1 + replicas) >= nodeCount so no node is idle.
+func calculateDesiredReplicas(nodeCount, totalPrimaries, maxReplicas, minReplicas int) int {
+	if totalPrimaries <= 0 || nodeCount <= 0 {
+		return minReplicas
 	}
 
-	desired := int(math.Ceil(float64(nodeCount)/float64(primaries))) - 1
+	desired := int(math.Ceil(float64(nodeCount)/float64(totalPrimaries))) - 1
 
 	if desired < minReplicas {
 		desired = minReplicas
@@ -424,7 +393,7 @@ func calculateDesiredReplicas(nodeCount, primaries, currentReplicas, maxReplicas
 		desired = maxReplicas
 	}
 
-	return desired, desired != currentReplicas
+	return desired
 }
 
 // filterIndices filters indices based on glob patterns and system index inclusion.
@@ -465,8 +434,43 @@ func filterIndices(indices []v1alpha1.IndexInfo, patterns []string, includeSyste
 	return filtered
 }
 
+// getNodeCountForIndices returns the number of unique nodes hosting shards for the given indices.
+// This ensures we only count nodes relevant to the filtered indices, not all data nodes in the cluster.
+func getNodeCountForIndices(es *elasticsearch.Client, indexNames []string) (int, error) {
+	if len(indexNames) == 0 {
+		return 0, nil
+	}
+
+	res, err := es.Cat.Shards(
+		es.Cat.Shards.WithIndex(indexNames...),
+		es.Cat.Shards.WithFormat("json"),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get shards information: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return 0, fmt.Errorf("error getting shards: %s", res.String())
+	}
+
+	var shards []v1alpha1.ShardInfo
+	if err := json.NewDecoder(res.Body).Decode(&shards); err != nil {
+		return 0, fmt.Errorf("failed to decode shards response: %w", err)
+	}
+
+	uniqueNodes := make(map[string]struct{})
+	for _, shard := range shards {
+		if shard.Node != "" {
+			uniqueNodes[shard.Node] = struct{}{}
+		}
+	}
+
+	return len(uniqueNodes), nil
+}
+
 // RebalanceShards adjusts the number_of_replicas of indices to optimize shard distribution
-// across data nodes. Returns the number of indices modified.
+// across the nodes hosting those indices. Returns the number of indices modified.
 func RebalanceShards(ctx *v1alpha1.Context) (int, error) {
 	cfg := ctx.Config.Target.Elasticsearch.ShardRebalancing
 
@@ -475,38 +479,57 @@ func RebalanceShards(ctx *v1alpha1.Context) (int, error) {
 		return 0, fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
 
-	nodeCount, err := getDataNodeCount(es)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get data node count: %w", err)
-	}
-
 	indices, err := getIndices(es)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get indices: %w", err)
 	}
 
 	filtered := filterIndices(indices, cfg.IndexPatterns, cfg.IncludeSystemIndices)
+	if len(filtered) == 0 {
+		return 0, nil
+	}
 
-	modified := 0
+	// Collect index names to query shards only for relevant indices
+	indexNames := make([]string, len(filtered))
+	for i, idx := range filtered {
+		indexNames[i] = idx.Index
+	}
+
+	nodeCount, err := getNodeCountForIndices(es, indexNames)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get node count for indices: %w", err)
+	}
+
+	// Sum total primaries across all filtered indices
+	totalPrimaries := 0
 	for _, idx := range filtered {
-		primaries, err := strconv.Atoi(idx.Pri)
+		pri, err := strconv.Atoi(idx.Pri)
 		if err != nil {
 			log.Printf("Error parsing primaries for index %s: %v", idx.Index, err)
 			continue
 		}
+		totalPrimaries += pri
+	}
+
+	desired := calculateDesiredReplicas(nodeCount, totalPrimaries, cfg.MaxReplicas, cfg.MinReplicas)
+
+	log.Printf("Shard rebalancing: %d indices, %d total primaries, %d nodes -> desired replicas: %d",
+		len(filtered), totalPrimaries, nodeCount, desired)
+
+	modified := 0
+	for _, idx := range filtered {
 		currentReplicas, err := strconv.Atoi(idx.Rep)
 		if err != nil {
 			log.Printf("Error parsing replicas for index %s: %v", idx.Index, err)
 			continue
 		}
 
-		desired, shouldUpdate := calculateDesiredReplicas(nodeCount, primaries, currentReplicas, cfg.MaxReplicas, cfg.MinReplicas)
-		if !shouldUpdate {
+		if currentReplicas == desired {
 			continue
 		}
 
-		log.Printf("Rebalancing index %s: changing replicas from %d to %d (nodes=%d, primaries=%d)",
-			idx.Index, currentReplicas, desired, nodeCount, primaries)
+		log.Printf("Rebalancing index %s: changing replicas from %d to %d",
+			idx.Index, currentReplicas, desired)
 
 		if err := updateIndexReplicas(ctx, es, idx.Index, desired); err != nil {
 			log.Printf("Error updating replicas for index %s: %v", idx.Index, err)
