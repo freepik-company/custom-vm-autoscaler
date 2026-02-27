@@ -151,22 +151,22 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 	// Prepare regex to match shards with
 	re, err := regexp.Compile(nodeName)
 	if err != nil {
-		log.Fatalf("Error compiling regex: %v", err)
+		return fmt.Errorf("error compiling regex: %w", err)
 	}
 
 	// Create a context with timeout
 	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), time.Duration(ctx.Config.Target.Elasticsearch.DrainTimeoutSec)*time.Second)
 	defer cancel()
 
-	for {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-		// Check if context is done for timeout
+	for {
 		select {
 		case <-ctxWithTimeout.Done():
 			if ctx.Config.Notifications.Slack.WebhookURL != "" {
 				message := fmt.Sprintf("Timeout draining instance %s in elasticsearch. Timeout reached in %d seconds", nodeName, ctx.Config.Target.Elasticsearch.DrainTimeoutSec)
-				err = slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL)
-				if err != nil {
+				if err := slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL); err != nil {
 					log.Printf("Error sending Slack notification: %v", err)
 				}
 			}
@@ -178,26 +178,33 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 			}
 
 			return fmt.Errorf("timeout trying to remove node from cluster settings in elasticsearch: %v", ctxWithTimeout.Err())
-		default:
+
+		case <-ticker.C:
 			// Get _cat/shards to check if nodeName has any shard inside
+			// Pass the timeout context so HTTP calls respect the deadline
 			res, err := es.Cat.Shards(
+				es.Cat.Shards.WithContext(ctxWithTimeout),
 				es.Cat.Shards.WithFormat("json"),
 				es.Cat.Shards.WithV(true),
 			)
 			if err != nil {
+				// If context expired during the request, let the next select iteration handle timeout
+				if ctxWithTimeout.Err() != nil {
+					continue
+				}
 				return fmt.Errorf("failed to get shards information: %w", err)
 			}
 
 			// Get response
 			body, err := io.ReadAll(res.Body)
-			res.Body.Close() // Close immediately after reading, not with defer in a loop
+			res.Body.Close()
 			if err != nil || string(body) == "" {
 				return fmt.Errorf("error reading response body: %w", err)
 			}
 
 			// Parse response in JSON
 			var shards []v1alpha1.ShardInfo
-			err = json.Unmarshal([]byte(string(body)), &shards)
+			err = json.Unmarshal(body, &shards)
 			if err != nil {
 				return fmt.Errorf("error deserializing JSON: %w", err)
 			}
@@ -207,6 +214,7 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 			for _, shard := range shards {
 				if re.MatchString(shard.Node) {
 					nodeFound = true
+					break
 				}
 			}
 
@@ -215,13 +223,8 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 				log.Printf("node %s is fully empty and ready to delete", nodeName)
 				return nil
 			}
-
-			// Sleep a brief period before next check to avoid excessive requests
-			time.Sleep(2 * time.Second)
 		}
-
 	}
-
 }
 
 // clearClusterSettings removes the node exclusion from cluster settings.
