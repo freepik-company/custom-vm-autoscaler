@@ -28,12 +28,11 @@ type ConfigSpec struct {
 			Password              string `yaml:"password,omitempty"`
 			SSLInsecureSkipVerify bool   `yaml:"sslInsecureSkipVerify,omitempty"`
 			DrainTimeoutSec       int    `yaml:"drainTimeoutSec,omitempty"`
-			ShardRebalancing      struct {
-				Enabled              bool     `yaml:"enabled,omitempty"`
-				IndexPatterns        []string `yaml:"indexPatterns,omitempty"`
-				MaxReplicas          int      `yaml:"maxReplicas,omitempty"`
-				MinReplicas          int      `yaml:"minReplicas,omitempty"`
-				IncludeSystemIndices bool     `yaml:"includeSystemIndices,omitempty"`
+			ShardRebalancing struct {
+				Enabled     bool     `yaml:"enabled,omitempty"`
+				Aliases     []string `yaml:"aliases,omitempty"`
+				MaxReplicas int      `yaml:"maxReplicas,omitempty"`
+				MinReplicas int      `yaml:"minReplicas,omitempty"`
 			} `yaml:"shardRebalancing,omitempty"`
 		} `yaml:"elasticsearch,omitempty"`
 	} `yaml:"target"`

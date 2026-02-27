@@ -27,7 +27,13 @@ type ShardInfo struct {
 	Node    string `json:"node"`
 }
 
-// IndexInfo struct for elasticsearch indices from _cat/indices
+// AliasInfo represents an Elasticsearch alias as returned by the _cat/aliases API.
+type AliasInfo struct {
+	Alias string `json:"alias"`
+	Index string `json:"index"`
+}
+
+// IndexInfo represents an Elasticsearch index as returned by the _cat/indices API.
 type IndexInfo struct {
 	Health    string `json:"health"`
 	Status    string `json:"status"`

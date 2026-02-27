@@ -12,7 +12,6 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -320,28 +319,6 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 	return nil
 }
 
-// getIndices returns the list of indices in the Elasticsearch cluster.
-func getIndices(es *elasticsearch.Client) ([]v1alpha1.IndexInfo, error) {
-	res, err := es.Cat.Indices(
-		es.Cat.Indices.WithFormat("json"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get indices information: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.IsError() {
-		return nil, fmt.Errorf("error getting indices: %s", res.String())
-	}
-
-	var indices []v1alpha1.IndexInfo
-	if err := json.NewDecoder(res.Body).Decode(&indices); err != nil {
-		return nil, fmt.Errorf("failed to decode indices response: %w", err)
-	}
-
-	return indices, nil
-}
-
 // updateIndexReplicas updates the number_of_replicas setting for a given index.
 func updateIndexReplicas(ctx *v1alpha1.Context, es *elasticsearch.Client, indexName string, replicas int) error {
 	if ctx.Config.Autoscaler.DebugMode {
@@ -396,42 +373,64 @@ func calculateDesiredReplicas(nodeCount, totalPrimaries, maxReplicas, minReplica
 	return desired
 }
 
-// filterIndices filters indices based on glob patterns and system index inclusion.
-func filterIndices(indices []v1alpha1.IndexInfo, patterns []string, includeSystem bool) []v1alpha1.IndexInfo {
-	var filtered []v1alpha1.IndexInfo
+// getIndicesForAliases resolves ES aliases to their underlying indices via _cat/aliases.
+func getIndicesForAliases(es *elasticsearch.Client, aliases []string) ([]v1alpha1.IndexInfo, error) {
+	if len(aliases) == 0 {
+		return nil, nil
+	}
 
-	for _, idx := range indices {
-		// Exclude closed indices
-		if idx.Status == "close" {
-			continue
-		}
+	res, err := es.Cat.Aliases(
+		es.Cat.Aliases.WithName(aliases...),
+		es.Cat.Aliases.WithFormat("json"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aliases: %w", err)
+	}
+	defer res.Body.Close()
 
-		// Exclude system indices (starting with .) unless explicitly included
-		if !includeSystem && strings.HasPrefix(idx.Index, ".") {
-			continue
-		}
+	if res.IsError() {
+		return nil, fmt.Errorf("error getting aliases: %s", res.String())
+	}
 
-		// If no patterns specified, include all remaining indices
-		if len(patterns) == 0 {
-			filtered = append(filtered, idx)
-			continue
-		}
+	var aliasInfos []v1alpha1.AliasInfo
+	if err := json.NewDecoder(res.Body).Decode(&aliasInfos); err != nil {
+		return nil, fmt.Errorf("failed to decode aliases response: %w", err)
+	}
 
-		// Check against glob patterns
-		for _, pattern := range patterns {
-			matched, err := path.Match(pattern, idx.Index)
-			if err != nil {
-				log.Printf("Invalid glob pattern %q: %v", pattern, err)
-				continue
-			}
-			if matched {
-				filtered = append(filtered, idx)
-				break
-			}
+	// Collect unique index names from aliases
+	indexNames := make([]string, 0, len(aliasInfos))
+	seen := make(map[string]struct{})
+	for _, a := range aliasInfos {
+		if _, ok := seen[a.Index]; !ok {
+			seen[a.Index] = struct{}{}
+			indexNames = append(indexNames, a.Index)
 		}
 	}
 
-	return filtered
+	if len(indexNames) == 0 {
+		return nil, nil
+	}
+
+	// Get full index info for resolved indices
+	res, err = es.Cat.Indices(
+		es.Cat.Indices.WithIndex(indexNames...),
+		es.Cat.Indices.WithFormat("json"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get indices information: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return nil, fmt.Errorf("error getting indices: %s", res.String())
+	}
+
+	var indices []v1alpha1.IndexInfo
+	if err := json.NewDecoder(res.Body).Decode(&indices); err != nil {
+		return nil, fmt.Errorf("failed to decode indices response: %w", err)
+	}
+
+	return indices, nil
 }
 
 // getNodeCountForIndices returns the number of unique nodes hosting shards for the given indices.
@@ -479,12 +478,10 @@ func RebalanceShards(ctx *v1alpha1.Context) (int, error) {
 		return 0, fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
 
-	indices, err := getIndices(es)
+	filtered, err := getIndicesForAliases(es, cfg.Aliases)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get indices: %w", err)
+		return 0, fmt.Errorf("failed to resolve aliases: %w", err)
 	}
-
-	filtered := filterIndices(indices, cfg.IndexPatterns, cfg.IncludeSystemIndices)
 	if len(filtered) == 0 {
 		return 0, nil
 	}

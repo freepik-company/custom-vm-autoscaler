@@ -30,12 +30,10 @@ target:
     sslInsecureSkipVerify: true
     shardRebalancing:
       enabled: true
-      indexPatterns:
-        - "logs-*"
-        - "metrics-*"
+      aliases:
+        - "image-v9"
       maxReplicas: 5
       minReplicas: 1
-      includeSystemIndices: false
 
 # Notifications service to send alerts to the team
 notifications:
