@@ -10,21 +10,19 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 )
 
-// DrainElasticsearchNode drains an Elasticsearch node and performs a controlled shutdown.
-// elasticURL: The URL of the Elasticsearch cluster.
-// nodeName: The name of the node to shut down.
-// username: The username for basic authentication.
-// password: The password for basic authentication.
-func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
-
+// newESClient creates a new Elasticsearch client from the context configuration.
+func newESClient(ctx *v1alpha1.Context) (*elasticsearch.Client, error) {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify,
@@ -32,7 +30,6 @@ func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
 		},
 	}
 
-	// Create elasticsearch config for connection
 	cfg := elasticsearch.Config{
 		Addresses: []string{ctx.Config.Target.Elasticsearch.URL},
 		Username:  ctx.Config.Target.Elasticsearch.User,
@@ -40,8 +37,13 @@ func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
 		Transport: tr,
 	}
 
-	// Creates new client
-	es, err := elasticsearch.NewClient(cfg)
+	return elasticsearch.NewClient(cfg)
+}
+
+// DrainElasticsearchNode drains an Elasticsearch node and performs a controlled shutdown.
+func DrainElasticsearchNode(ctx *v1alpha1.Context, nodeName string) error {
+
+	es, err := newESClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
@@ -226,23 +228,7 @@ func waitForNodeRemoval(ctx *v1alpha1.Context, es *elasticsearch.Client, nodeNam
 // clearClusterSettings removes the node exclusion from cluster settings.
 func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) error {
 
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: ctx.Config.Target.Elasticsearch.SSLInsecureSkipVerify,
-			MinVersion:         tls.VersionTLS13,
-		},
-	}
-
-	// Configure elasticsearch connection
-	cfg := elasticsearch.Config{
-		Addresses: []string{ctx.Config.Target.Elasticsearch.URL},
-		Username:  ctx.Config.Target.Elasticsearch.User,
-		Password:  ctx.Config.Target.Elasticsearch.Password,
-		Transport: tr,
-	}
-
-	// Create elastic client
-	es, err := elasticsearch.NewClient(cfg)
+	es, err := newESClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create Elasticsearch client: %w", err)
 	}
@@ -332,4 +318,202 @@ func ClearElasticsearchClusterSettings(ctx *v1alpha1.Context, nodeName string) e
 	}
 
 	return nil
+}
+
+// getDataNodeCount returns the number of data nodes in the Elasticsearch cluster.
+func getDataNodeCount(es *elasticsearch.Client) (int, error) {
+	res, err := es.Cat.Nodes(
+		es.Cat.Nodes.WithFormat("json"),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get nodes information: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return 0, fmt.Errorf("error getting nodes: %s", res.String())
+	}
+
+	var nodes []v1alpha1.NodeInfo
+	if err := json.NewDecoder(res.Body).Decode(&nodes); err != nil {
+		return 0, fmt.Errorf("failed to decode nodes response: %w", err)
+	}
+
+	count := 0
+	for _, node := range nodes {
+		if strings.Contains(node.NodeRole, "d") {
+			count++
+		}
+	}
+
+	return count, nil
+}
+
+// getIndices returns the list of indices in the Elasticsearch cluster.
+func getIndices(es *elasticsearch.Client) ([]v1alpha1.IndexInfo, error) {
+	res, err := es.Cat.Indices(
+		es.Cat.Indices.WithFormat("json"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get indices information: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return nil, fmt.Errorf("error getting indices: %s", res.String())
+	}
+
+	var indices []v1alpha1.IndexInfo
+	if err := json.NewDecoder(res.Body).Decode(&indices); err != nil {
+		return nil, fmt.Errorf("failed to decode indices response: %w", err)
+	}
+
+	return indices, nil
+}
+
+// updateIndexReplicas updates the number_of_replicas setting for a given index.
+func updateIndexReplicas(ctx *v1alpha1.Context, es *elasticsearch.Client, indexName string, replicas int) error {
+	if ctx.Config.Autoscaler.DebugMode {
+		log.Printf("Debug mode enabled. Skipping PUT %s/_settings with number_of_replicas=%d", indexName, replicas)
+		return nil
+	}
+
+	settings := map[string]map[string]int{
+		"index": {
+			"number_of_replicas": replicas,
+		},
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	res, err := es.Indices.PutSettings(
+		bytes.NewReader(data),
+		es.Indices.PutSettings.WithIndex(indexName),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update index settings for %s: %w", indexName, err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("error updating index settings for %s: %s", indexName, res.String())
+	}
+
+	return nil
+}
+
+// calculateDesiredReplicas computes the optimal number of replicas for an index.
+// Returns the desired replica count and whether an update is needed.
+func calculateDesiredReplicas(nodeCount, primaries, currentReplicas, maxReplicas, minReplicas int) (int, bool) {
+	if primaries <= 0 {
+		return currentReplicas, false
+	}
+	if nodeCount <= 0 {
+		return minReplicas, minReplicas != currentReplicas
+	}
+
+	desired := int(math.Ceil(float64(nodeCount)/float64(primaries))) - 1
+
+	if desired < minReplicas {
+		desired = minReplicas
+	}
+	if maxReplicas > 0 && desired > maxReplicas {
+		desired = maxReplicas
+	}
+
+	return desired, desired != currentReplicas
+}
+
+// filterIndices filters indices based on glob patterns and system index inclusion.
+func filterIndices(indices []v1alpha1.IndexInfo, patterns []string, includeSystem bool) []v1alpha1.IndexInfo {
+	var filtered []v1alpha1.IndexInfo
+
+	for _, idx := range indices {
+		// Exclude closed indices
+		if idx.Status == "close" {
+			continue
+		}
+
+		// Exclude system indices (starting with .) unless explicitly included
+		if !includeSystem && strings.HasPrefix(idx.Index, ".") {
+			continue
+		}
+
+		// If no patterns specified, include all remaining indices
+		if len(patterns) == 0 {
+			filtered = append(filtered, idx)
+			continue
+		}
+
+		// Check against glob patterns
+		for _, pattern := range patterns {
+			matched, err := path.Match(pattern, idx.Index)
+			if err != nil {
+				log.Printf("Invalid glob pattern %q: %v", pattern, err)
+				continue
+			}
+			if matched {
+				filtered = append(filtered, idx)
+				break
+			}
+		}
+	}
+
+	return filtered
+}
+
+// RebalanceShards adjusts the number_of_replicas of indices to optimize shard distribution
+// across data nodes. Returns the number of indices modified.
+func RebalanceShards(ctx *v1alpha1.Context) (int, error) {
+	cfg := ctx.Config.Target.Elasticsearch.ShardRebalancing
+
+	es, err := newESClient(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create Elasticsearch client: %w", err)
+	}
+
+	nodeCount, err := getDataNodeCount(es)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get data node count: %w", err)
+	}
+
+	indices, err := getIndices(es)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get indices: %w", err)
+	}
+
+	filtered := filterIndices(indices, cfg.IndexPatterns, cfg.IncludeSystemIndices)
+
+	modified := 0
+	for _, idx := range filtered {
+		primaries, err := strconv.Atoi(idx.Pri)
+		if err != nil {
+			log.Printf("Error parsing primaries for index %s: %v", idx.Index, err)
+			continue
+		}
+		currentReplicas, err := strconv.Atoi(idx.Rep)
+		if err != nil {
+			log.Printf("Error parsing replicas for index %s: %v", idx.Index, err)
+			continue
+		}
+
+		desired, shouldUpdate := calculateDesiredReplicas(nodeCount, primaries, currentReplicas, cfg.MaxReplicas, cfg.MinReplicas)
+		if !shouldUpdate {
+			continue
+		}
+
+		log.Printf("Rebalancing index %s: changing replicas from %d to %d (nodes=%d, primaries=%d)",
+			idx.Index, currentReplicas, desired, nodeCount, primaries)
+
+		if err := updateIndexReplicas(ctx, es, idx.Index, desired); err != nil {
+			log.Printf("Error updating replicas for index %s: %v", idx.Index, err)
+			continue
+		}
+		modified++
+	}
+
+	return modified, nil
 }

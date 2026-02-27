@@ -27,6 +27,17 @@ type ShardInfo struct {
 	Node    string `json:"node"`
 }
 
+// IndexInfo struct for elasticsearch indices from _cat/indices
+type IndexInfo struct {
+	Health    string `json:"health"`
+	Status    string `json:"status"`
+	Index     string `json:"index"`
+	Pri       string `json:"pri"`
+	Rep       string `json:"rep"`
+	DocsCount string `json:"docs.count"`
+	StoreSize string `json:"store.size"`
+}
+
 // settings struct for elasticsearch settings
 type ElasticsearchSettings struct {
 	Persistent map[string]interface{} `json:"persistent"`

@@ -3,6 +3,7 @@ package run
 import (
 	"custom-vm-autoscaler/api/v1alpha1"
 	"custom-vm-autoscaler/internal/config"
+	"custom-vm-autoscaler/internal/elasticsearch"
 	"custom-vm-autoscaler/internal/google"
 	"custom-vm-autoscaler/internal/prometheus"
 	"custom-vm-autoscaler/internal/slack"
@@ -79,6 +80,9 @@ func RunCommand(cmd *cobra.Command, args []string) {
 	if ctx.Config.Autoscaler.ScaleUpThreshold == 0 {
 		ctx.Config.Autoscaler.ScaleUpThreshold = defaultScaleUpThreshold
 	}
+	if ctx.Config.Target.Elasticsearch.ShardRebalancing.Enabled && ctx.Config.Target.Elasticsearch.ShardRebalancing.MinReplicas == 0 {
+		ctx.Config.Target.Elasticsearch.ShardRebalancing.MinReplicas = defaultShardRebalancingMinReplicas
+	}
 
 	// Main loop to monitor scaling conditions and manage the MIG
 	for {
@@ -145,6 +149,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 					log.Printf("Error sending Slack notification: %v", err)
 				}
 			}
+			rebalanceShardsIfEnabled(&ctx, "scale-up")
 			// Sleep for the default cooldown period before checking the conditions again
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
 			continue
@@ -193,6 +198,7 @@ func RunCommand(cmd *cobra.Command, args []string) {
 					log.Printf("Error sending Slack notification: %v", err)
 				}
 			}
+			rebalanceShardsIfEnabled(&ctx, "scale-down")
 			// Sleep for the scaledown cooldown period before checking the conditions again
 			time.Sleep(time.Duration(ctx.Config.Autoscaler.ScaleDownCooldownPeriodSec) * time.Second)
 			continue
@@ -202,5 +208,26 @@ func RunCommand(cmd *cobra.Command, args []string) {
 		log.Printf("No condition %s or %s met, keeping the same number of nodes!", ctx.Config.Metrics.Prometheus.UpCondition, ctx.Config.Metrics.Prometheus.DownCondition)
 		// Sleep for the default cooldown period before checking the conditions again
 		time.Sleep(time.Duration(ctx.Config.Autoscaler.DefaultCooldownPeriodSec) * time.Second)
+	}
+}
+
+// rebalanceShardsIfEnabled runs shard rebalancing if enabled in configuration.
+func rebalanceShardsIfEnabled(ctx *v1alpha1.Context, operation string) {
+	if !ctx.Config.Target.Elasticsearch.ShardRebalancing.Enabled {
+		return
+	}
+	modified, err := elasticsearch.RebalanceShards(ctx)
+	if err != nil {
+		log.Printf("Error rebalancing shards after %s: %v", operation, err)
+		return
+	}
+	if modified > 0 {
+		log.Printf("Rebalanced replicas on %d indices after %s", modified, operation)
+		if ctx.Config.Notifications.Slack.WebhookURL != "" {
+			message := fmt.Sprintf("Rebalanced replicas on %d indices after %s", modified, operation)
+			if err := slack.NotifySlack(message, ctx.Config.Notifications.Slack.WebhookURL); err != nil {
+				log.Printf("Error sending Slack notification: %v", err)
+			}
+		}
 	}
 }

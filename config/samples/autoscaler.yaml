@@ -28,6 +28,14 @@ target:
     user: "${ELASTICSEARCH_USER}"
     password: "${ELASTICSEARCH_PASSWORD}"
     sslInsecureSkipVerify: true
+    shardRebalancing:
+      enabled: true
+      indexPatterns:
+        - "logs-*"
+        - "metrics-*"
+      maxReplicas: 5
+      minReplicas: 1
+      includeSystemIndices: false
 
 # Notifications service to send alerts to the team
 notifications:
